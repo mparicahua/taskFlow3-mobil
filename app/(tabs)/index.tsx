@@ -1,13 +1,15 @@
 import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { HelloWave } from '@/components/hello-wave';
 import ParallaxScrollView from '@/components/parallax-scroll-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function HomeScreen() {
+  const { user } = useAuth();
+
   return (
     <ParallaxScrollView
       headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
@@ -18,61 +20,75 @@ export default function HomeScreen() {
         />
       }>
       <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Hola!</ThemedText>
+        <ThemedText type="title">¡Hola, {user?.nombre || 'Usuario'}!</ThemedText>
         <HelloWave />
       </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
 
+      <ThemedView style={styles.stepContainer}>
+        <ThemedText type="subtitle">Bienvenido a TaskFlow3</ThemedText>
         <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
+          Has iniciado sesión correctamente en tu app móvil de TaskFlow3.
         </ThemedText>
       </ThemedView>
+
       <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
+        <ThemedText type="subtitle">Tu Perfil</ThemedText>
+        <View style={styles.infoContainer}>
+          <View style={styles.avatarContainer}>
+            <View 
+              style={[
+                styles.avatar, 
+                { backgroundColor: user?.color_avatar || '#3B82F6' }
+              ]}
+            >
+              <ThemedText style={styles.avatarText}>
+                {user?.iniciales || 'TF'}
+              </ThemedText>
+            </View>
+          </View>
+          
+          <View style={styles.infoRow}>
+            <ThemedText type="defaultSemiBold">Nombre: </ThemedText>
+            <ThemedText>{user?.nombre}</ThemedText>
+          </View>
+          
+          <View style={styles.infoRow}>
+            <ThemedText type="defaultSemiBold">Email: </ThemedText>
+            <ThemedText>{user?.email}</ThemedText>
+          </View>
+          
+          <View style={styles.infoRow}>
+            <ThemedText type="defaultSemiBold">ID: </ThemedText>
+            <ThemedText>{user?.id}</ThemedText>
+          </View>
+        </View>
+      </ThemedView>
+
+      <ThemedView style={styles.stepContainer}>
+        <ThemedText type="subtitle">¿Qué puedes hacer?</ThemedText>
         <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
+          • Gestionar tus proyectos y tareas
         </ThemedText>
+        <ThemedText>
+          • Colaborar con tu equipo
+        </ThemedText>
+        <ThemedText>
+          • Organizar tareas con tableros Kanban
+        </ThemedText>
+        <ThemedText>
+          • Puedes cerrar sesión usando el botón en la esquina superior derecha
+        </ThemedText>
+      </ThemedView>
+
+      <ThemedView style={styles.stepContainer}>
+        <ThemedText type="subtitle">Próximas Funciones</ThemedText>
+        <ThemedText>
+          Estamos trabajando en traer todas las funciones de la web a la app móvil:
+        </ThemedText>
+        <ThemedText>• Vista de proyectos</ThemedText>
+        <ThemedText>• Tablero Kanban</ThemedText>
+        <ThemedText>• Gestión de tareas</ThemedText>
+        <ThemedText>• Notificaciones push</ThemedText>
       </ThemedView>
     </ParallaxScrollView>
   );
@@ -94,5 +110,29 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     position: 'absolute',
+  },
+  infoContainer: {
+    gap: 12,
+    paddingVertical: 8,
+  },
+  avatarContainer: {
+    alignItems: 'center',
+    marginVertical: 16,
+  },
+  avatar: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  avatarText: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+  },
+  infoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
 });

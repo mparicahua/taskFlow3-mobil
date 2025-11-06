@@ -1,7 +1,9 @@
+import { useAuth } from '@/contexts/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
-import { Link } from 'expo-router';
 import React, { useState } from 'react';
 import {
+    ActivityIndicator,
+    Alert,
     KeyboardAvoidingView,
     Platform,
     SafeAreaView,
@@ -14,19 +16,39 @@ import {
 } from 'react-native';
 
 export default function LoginScreen() {
+  const { login, isLoading } = useAuth();
+  
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
 
-  const handleLogin = () => {
-    // Aquí irá la lógica de login más adelante
-    console.log('Login pressed', { email, password, rememberMe });
-  };
+  const handleLogin = async () => {
+    // Validaciones básicas
+    if (!email.trim()) {
+      Alert.alert('Error', 'Por favor ingresa tu email');
+      return;
+    }
 
-  const handleGoogleLogin = () => {
-    // Aquí irá la lógica de Google login más adelante
-    console.log('Google login pressed');
+    if (!password.trim()) {
+      Alert.alert('Error', 'Por favor ingresa tu contraseña');
+      return;
+    }
+
+    if (password.length < 6) {
+      Alert.alert('Error', 'La contraseña debe tener al menos 6 caracteres');
+      return;
+    }
+
+    try {
+      await login(email, password);
+      // La navegación se maneja automáticamente en el contexto
+    } catch (error: any) {
+      Alert.alert(
+        'Error de inicio de sesión',
+        error.message || 'No se pudo iniciar sesión. Verifica tus credenciales.'
+      );
+    }
   };
 
   return (
@@ -57,19 +79,6 @@ export default function LoginScreen() {
             </View>
           </View>
 
-          {/* Google Button */}
-          <TouchableOpacity style={styles.googleButton} onPress={handleGoogleLogin}>
-            <Ionicons name="logo-google" size={20} color="#FFFFFF" />
-            <Text style={styles.googleButtonText}>Continuar con Google</Text>
-          </TouchableOpacity>
-
-          {/* Divider */}
-          <View style={styles.dividerContainer}>
-            <View style={styles.divider} />
-            <Text style={styles.dividerText}>O continúa con</Text>
-            <View style={styles.divider} />
-          </View>
-
           {/* Email Input */}
           <View style={styles.inputContainer}>
             <Text style={styles.label}>Email</Text>
@@ -82,6 +91,7 @@ export default function LoginScreen() {
               keyboardType="email-address"
               autoCapitalize="none"
               autoComplete="email"
+              editable={!isLoading}
             />
           </View>
 
@@ -97,6 +107,7 @@ export default function LoginScreen() {
                 onChangeText={setPassword}
                 secureTextEntry={!showPassword}
                 autoCapitalize="none"
+                editable={!isLoading}
               />
               <TouchableOpacity
                 style={styles.eyeIcon}
@@ -116,6 +127,7 @@ export default function LoginScreen() {
             <TouchableOpacity
               style={styles.rememberMeContainer}
               onPress={() => setRememberMe(!rememberMe)}
+              disabled={isLoading}
             >
               <View style={[styles.checkbox, rememberMe && styles.checkboxChecked]}>
                 {rememberMe && <Ionicons name="checkmark" size={14} color="#FFFFFF" />}
@@ -123,22 +135,23 @@ export default function LoginScreen() {
               <Text style={styles.rememberMeText}>Recordarme</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity>
+            <TouchableOpacity disabled={isLoading}>
               <Text style={styles.forgotPasswordText}>¿Olvidaste tu contraseña?</Text>
             </TouchableOpacity>
           </View>
 
           {/* Login Button */}
-          <TouchableOpacity style={styles.loginButton} onPress={handleLogin}>
-            <Text style={styles.loginButtonText}>Iniciar Sesión</Text>
+          <TouchableOpacity 
+            style={[styles.loginButton, isLoading && styles.loginButtonDisabled]} 
+            onPress={handleLogin}
+            disabled={isLoading}
+          >
+            {isLoading ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.loginButtonText}>Iniciar Sesión</Text>
+            )}
           </TouchableOpacity>
-
-          {/* Dashboard Link */}
-          <Link href="/(tabs)" asChild>
-            <TouchableOpacity style={styles.dashboardButton}>
-              <Text style={styles.dashboardButtonText}>Dashboard</Text>
-            </TouchableOpacity>
-          </Link>
 
           {/* Terms and Privacy */}
           <View style={styles.termsContainer}>
@@ -199,38 +212,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#3B82F6',
     fontWeight: '600',
-  },
-  googleButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#1E293B',
-    borderRadius: 12,
-    paddingVertical: 16,
-    marginBottom: 24,
-    borderWidth: 1,
-    borderColor: '#334155',
-    gap: 12,
-  },
-  googleButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  dividerContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  divider: {
-    flex: 1,
-    height: 1,
-    backgroundColor: '#334155',
-  },
-  dividerText: {
-    color: '#64748B',
-    fontSize: 14,
-    marginHorizontal: 16,
   },
   inputContainer: {
     marginBottom: 20,
@@ -309,22 +290,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 12,
   },
+  loginButtonDisabled: {
+    opacity: 0.6,
+  },
   loginButtonText: {
     color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  dashboardButton: {
-    backgroundColor: 'transparent',
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#334155',
-    marginBottom: 24,
-  },
-  dashboardButtonText: {
-    color: '#F1F5F9',
     fontSize: 16,
     fontWeight: '600',
   },
@@ -333,6 +303,7 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     justifyContent: 'center',
     alignItems: 'center',
+    marginTop: 12,
   },
   termsText: {
     fontSize: 12,
