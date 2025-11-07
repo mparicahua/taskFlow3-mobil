@@ -1,6 +1,6 @@
 import { Tabs } from 'expo-router';
 import React from 'react';
-import { Alert, TouchableOpacity } from 'react-native';
+import { Alert, Platform, TouchableOpacity } from 'react-native';
 
 import { HapticTab } from '@/components/haptic-tab';
 import { IconSymbol } from '@/components/ui/icon-symbol';
@@ -14,27 +14,39 @@ export default function TabLayout() {
   const { logout } = useAuth();
 
   const handleLogout = () => {
-    Alert.alert(
-      'Cerrar Sesión',
-      '¿Estás seguro que deseas cerrar sesión?',
-      [
-        {
-          text: 'Cancelar',
-          style: 'cancel',
-        },
-        {
-          text: 'Cerrar Sesión',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await logout();
-            } catch (error) {
-              Alert.alert('Error', 'No se pudo cerrar sesión');
-            }
+    if (Platform.OS === 'web') {
+      // En web usar confirm del navegador
+      const confirmed = window.confirm('¿Estás seguro que deseas cerrar sesión?');
+      if (confirmed) {
+        logout().catch((error) => {
+          alert('No se pudo cerrar sesión');
+          console.error('Logout error:', error);
+        });
+      }
+    } else {
+      // En móvil usar Alert nativo
+      Alert.alert(
+        'Cerrar Sesión',
+        '¿Estás seguro que deseas cerrar sesión?',
+        [
+          {
+            text: 'Cancelar',
+            style: 'cancel',
           },
-        },
-      ]
-    );
+          {
+            text: 'Cerrar Sesión',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                await logout();
+              } catch (error) {
+                Alert.alert('Error', 'No se pudo cerrar sesión');
+              }
+            },
+          },
+        ]
+      );
+    }
   };
 
   return (
@@ -57,6 +69,13 @@ export default function TabLayout() {
               <Ionicons name="log-out-outline" size={24} color={Colors[colorScheme ?? 'light'].tint} />
             </TouchableOpacity>
           ),
+        }}
+      />
+      <Tabs.Screen
+        name="projects"
+        options={{
+          title: 'Proyectos',
+          tabBarIcon: ({ color }) => <Ionicons name="folder-outline" size={28} color={color} />,
         }}
       />
       <Tabs.Screen
