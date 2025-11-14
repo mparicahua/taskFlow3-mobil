@@ -7,35 +7,44 @@ import {
   Alert,
   FlatList,
   Modal,
-  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
   View,
-  useColorScheme,
+  useColorScheme
 } from 'react-native';
 
 const API_URL = 'https://taskflow3-server-production.up.railway.app';
+
+interface User {
+  id: number;
+  nombre: string;
+  email: string;
+  iniciales: string;
+  color_avatar: string;
+}
+
+interface Role {
+  id: number;
+  nombre: string;
+  descripcion: string;
+}
+
+interface ProjectMember {
+  usuario: User;
+  rol: Role;
+}
 
 interface Project {
   id: number;
   nombre: string;
   descripcion: string | null;
   es_colaborativo: boolean;
-  proyecto_usuario_rol: Array<{
-    usuario: {
-      id: number;
-      nombre: string;
-      iniciales: string;
-      color_avatar: string;
-    };
-    rol: {
-      nombre: string;
-    };
-  }>;
+  proyecto_usuario_rol: ProjectMember[];
 }
 
 export default function ProjectsScreen() {
@@ -47,16 +56,30 @@ export default function ProjectsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
-  const [creatingProject, setCreatingProject] = useState(false);
+  const [savingProject, setSavingProject] = useState(false);
   
-  // Formulario de nuevo proyecto
-  const [newProject, setNewProject] = useState({
+  // Modo edición
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [editingProject, setEditingProject] = useState<Project | null>(null);
+  const [previousCollaborative, setPreviousCollaborative] = useState(true);
+  
+  // Formulario de proyecto
+  const [projectForm, setProjectForm] = useState({
     nombre: '',
     descripcion: '',
     es_colaborativo: true,
   });
 
-  // Colores dinámicos basados en el tema
+  // Gestión de miembros (solo para modo editar)
+  const [allUsers, setAllUsers] = useState<User[]>([]);
+  const [allRoles, setAllRoles] = useState<Role[]>([]);
+  const [availableUsers, setAvailableUsers] = useState<User[]>([]);
+  const [projectMembers, setProjectMembers] = useState<ProjectMember[]>([]);
+  const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
+  const [selectedRoleId, setSelectedRoleId] = useState<number | null>(null);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+
+  // Colores dinámicos
   const colors = {
     background: isDark ? '#0F172A' : '#F8FAFC',
     card: isDark ? '#1E293B' : '#FFFFFF',
@@ -74,19 +97,14 @@ export default function ProjectsScreen() {
 
   // Cargar proyectos
   const loadProjects = useCallback(async () => {
-    if (!user?.id) {
-      console.log('No user ID yet, skipping load');
-      return;
-    }
+    if (!user?.id) return;
 
     try {
-      console.log('Loading projects for user:', user.id);
       const response = await fetch(`${API_URL}/api/projects/user/${user.id}`);
       const data = await response.json();
 
       if (data.success) {
         setProjects(data.data);
-        console.log('Projects loaded:', data.data.length);
       } else {
         Alert.alert('Error', 'No se pudieron cargar los proyectos');
       }
@@ -99,7 +117,7 @@ export default function ProjectsScreen() {
     }
   }, [user?.id]);
 
-  // Recargar al enfocar la pantalla
+  // Recargar al enfocar
   useFocusEffect(
     useCallback(() => {
       loadProjects();
@@ -112,21 +130,205 @@ export default function ProjectsScreen() {
     loadProjects();
   };
 
+  // Cargar usuarios y roles
+  const loadUsersAndRoles = async () => {
+    setLoadingUsers(true);
+    try {
+      const [usersResponse, rolesResponse] = await Promise.all([
+        fetch(`${API_URL}/api/users`),
+        fetch(`${API_URL}/api/users/roles`),
+      ]);
+
+      const usersData = await usersResponse.json();
+      const rolesData = await rolesResponse.json();
+
+      if (usersData.success && rolesData.success) {
+        setAllUsers(usersData.data);
+        setAllRoles(rolesData.data);
+      }
+    } catch (error) {
+      console.error('Error loading users/roles:', error);
+    } finally {
+      setLoadingUsers(false);
+    }
+  };
+
+  // Cargar usuarios disponibles
+  const loadAvailableUsers = async (proyectoId: number) => {
+    try {
+      const response = await fetch(`${API_URL}/api/users/disponibles/${proyectoId}`);
+      const data = await response.json();
+      if (data.success) {
+        setAvailableUsers(data.data);
+      }
+    } catch (error) {
+      console.error('Error loading available users:', error);
+    }
+  };
+
+  // Abrir modal para crear
+  const openCreateModal = () => {
+    setIsEditMode(false);
+    setEditingProject(null);
+    setProjectForm({
+      nombre: '',
+      descripcion: '',
+      es_colaborativo: true,
+    });
+    setPreviousCollaborative(true);
+    setModalVisible(true);
+  };
+
+  // Abrir modal para editar
+  const openEditModal = async (project: Project) => {
+    await loadUsersAndRoles();
+    setIsEditMode(true);
+    setEditingProject(project);
+    setProjectForm({
+      nombre: project.nombre,
+      descripcion: project.descripcion || '',
+      es_colaborativo: project.es_colaborativo,
+    });
+    setPreviousCollaborative(project.es_colaborativo);
+    setProjectMembers(project.proyecto_usuario_rol || []);
+    await loadAvailableUsers(project.id);
+    setModalVisible(true);
+  };
+
+  // Toggle colaborativo
+  const toggleCollaborative = () => {
+    const newValue = !projectForm.es_colaborativo;
+
+    // Si está en modo edición y era colaborativo antes y ahora lo desactiva
+    if (isEditMode && previousCollaborative && !newValue && editingProject) {
+      Alert.alert(
+        'Confirmar',
+        '¿Desactivar proyecto colaborativo? Esto eliminará a todos los miembros excepto al propietario.',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          {
+            text: 'Confirmar',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                const response = await fetch(
+                  `${API_URL}/api/projects/${editingProject.id}/miembros`,
+                  { method: 'DELETE' }
+                );
+                const data = await response.json();
+
+                if (data.success) {
+                  setProjectForm({ ...projectForm, es_colaborativo: newValue });
+                  setProjectMembers(
+                    projectMembers.filter(m => m.rol.nombre === 'Propietario')
+                  );
+                  await loadAvailableUsers(editingProject.id);
+                } else {
+                  Alert.alert('Error', data.message || 'Error al eliminar miembros');
+                }
+              } catch (error) {
+                console.error('Error:', error);
+                Alert.alert('Error', 'Error al eliminar miembros');
+              }
+            },
+          },
+        ]
+      );
+    } else {
+      setProjectForm({ ...projectForm, es_colaborativo: newValue });
+    }
+  };
+
+  // Agregar miembro al proyecto (modo editar)
+  const addMemberToProject = async () => {
+    if (!selectedUserId || !selectedRoleId) {
+      Alert.alert('Error', 'Selecciona un usuario y un rol');
+      return;
+    }
+
+    if (!editingProject) return;
+
+    try {
+      const response = await fetch(
+        `${API_URL}/api/projects/${editingProject.id}/miembros`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            usuario_id: selectedUserId,
+            rol_id: selectedRoleId,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (data.success) {
+        setProjectMembers([...projectMembers, data.data]);
+        await loadAvailableUsers(editingProject.id);
+        setSelectedUserId(null);
+        setSelectedRoleId(null);
+      } else {
+        Alert.alert('Error', data.message || 'Error al agregar miembro');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      Alert.alert('Error', 'Error al agregar miembro');
+    }
+  };
+
+  // Eliminar miembro del proyecto (modo editar)
+  const removeMemberFromProject = async (usuarioId: number) => {
+    if (!editingProject) return;
+
+    Alert.alert(
+      'Confirmar',
+      '¿Eliminar este miembro del proyecto?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Eliminar',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const response = await fetch(
+                `${API_URL}/api/projects/${editingProject.id}/miembros/${usuarioId}`,
+                { method: 'DELETE' }
+              );
+
+              const data = await response.json();
+
+              if (data.success) {
+                setProjectMembers(projectMembers.filter(m => m.usuario.id !== usuarioId));
+                await loadAvailableUsers(editingProject.id);
+              } else {
+                Alert.alert('Error', data.message || 'Error al eliminar miembro');
+              }
+            } catch (error) {
+              console.error('Error:', error);
+              Alert.alert('Error', 'Error al eliminar miembro');
+            }
+          },
+        },
+      ]
+    );
+  };
+
   // Crear proyecto
-  const handleCreateProject = async () => {
-    if (!newProject.nombre.trim()) {
+  const createProject = async () => {
+    if (!projectForm.nombre.trim()) {
       Alert.alert('Error', 'El nombre del proyecto es requerido');
       return;
     }
 
-    setCreatingProject(true);
+    setSavingProject(true);
 
     try {
       const response = await fetch(`${API_URL}/api/projects`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...newProject,
+          ...projectForm,
           usuario_id: user?.id,
         }),
       });
@@ -135,8 +337,7 @@ export default function ProjectsScreen() {
 
       if (data.success) {
         Alert.alert('Éxito', 'Proyecto creado correctamente');
-        setModalVisible(false);
-        setNewProject({ nombre: '', descripcion: '', es_colaborativo: true });
+        closeModal();
         loadProjects();
       } else {
         Alert.alert('Error', data.message || 'No se pudo crear el proyecto');
@@ -145,72 +346,102 @@ export default function ProjectsScreen() {
       console.error('Error creating project:', error);
       Alert.alert('Error', 'Error de conexión');
     } finally {
-      setCreatingProject(false);
+      setSavingProject(false);
     }
+  };
+
+  // Editar proyecto
+  const updateProject = async () => {
+    if (!projectForm.nombre.trim()) {
+      Alert.alert('Error', 'El nombre del proyecto es requerido');
+      return;
+    }
+
+    if (!editingProject) return;
+
+    setSavingProject(true);
+
+    try {
+      const response = await fetch(`${API_URL}/api/projects/${editingProject.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...projectForm,
+          usuario_id: user?.id,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        Alert.alert('Éxito', 'Proyecto actualizado correctamente');
+        closeModal();
+        loadProjects();
+      } else {
+        Alert.alert('Error', data.message || 'No se pudo actualizar el proyecto');
+      }
+    } catch (error) {
+      console.error('Error updating project:', error);
+      Alert.alert('Error', 'Error de conexión');
+    } finally {
+      setSavingProject(false);
+    }
+  };
+
+  // Cerrar modal
+  const closeModal = () => {
+    setModalVisible(false);
+    setIsEditMode(false);
+    setEditingProject(null);
+    setProjectForm({
+      nombre: '',
+      descripcion: '',
+      es_colaborativo: true,
+    });
+    setPreviousCollaborative(true);
+    setProjectMembers([]);
+    setAvailableUsers([]);
+    setSelectedUserId(null);
+    setSelectedRoleId(null);
   };
 
   // Abrir proyecto
   const openProject = (project: Project) => {
-    console.log('Opening project:', project.id);
-    Alert.alert('Info', `Abrir proyecto: ${project.nombre}`);
+    Alert.alert('Info', `Abrir proyecto: ${project.nombre}\n(Próximamente: Tablero Kanban)`);
   };
 
   // Eliminar proyecto
   const deleteProject = (project: Project) => {
-    const confirmDelete = () => {
-      Alert.alert(
-        'Confirmar',
-        `¿Estás seguro de eliminar "${project.nombre}"?`,
-        [
-          { text: 'Cancelar', style: 'cancel' },
-          {
-            text: 'Eliminar',
-            style: 'destructive',
-            onPress: async () => {
-              try {
-                const response = await fetch(`${API_URL}/api/projects/${project.id}`, {
-                  method: 'DELETE',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ usuario_id: user?.id }),
-                });
-                const data = await response.json();
-                if (data.success) {
-                  setProjects(projects.filter((p) => p.id !== project.id));
-                  Alert.alert('Éxito', 'Proyecto eliminado');
-                } else {
-                  Alert.alert('Error', data.message || 'Error al eliminar');
-                }
-              } catch (error) {
-                console.error('Error deleting project:', error);
-                Alert.alert('Error', 'Error de conexión');
+    Alert.alert(
+      'Confirmar',
+      `¿Estás seguro de eliminar "${project.nombre}"?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Eliminar',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const response = await fetch(`${API_URL}/api/projects/${project.id}`, {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ usuario_id: user?.id }),
+              });
+              const data = await response.json();
+              if (data.success) {
+                setProjects(projects.filter(p => p.id !== project.id));
+                Alert.alert('Éxito', 'Proyecto eliminado');
+              } else {
+                Alert.alert('Error', data.message || 'Error al eliminar');
               }
-            },
-          },
-        ]
-      );
-    };
-
-    if (Platform.OS === 'web') {
-      const confirmed = window.confirm(`¿Estás seguro de eliminar "${project.nombre}"?`);
-      if (confirmed) {
-        fetch(`${API_URL}/api/projects/${project.id}`, {
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ usuario_id: user?.id }),
-        })
-          .then((res) => res.json())
-          .then((data) => {
-            if (data.success) {
-              setProjects(projects.filter((p) => p.id !== project.id));
-            } else {
-              alert(data.message || 'Error al eliminar');
+            } catch (error) {
+              console.error('Error deleting project:', error);
+              Alert.alert('Error', 'Error de conexión');
             }
-          })
-          .catch(() => alert('Error de conexión'));
-      }
-    } else {
-      confirmDelete();
-    }
+          },
+        },
+      ]
+    );
   };
 
   // Renderizar tarjeta de proyecto
@@ -233,7 +464,7 @@ export default function ProjectsScreen() {
         <View style={styles.projectActions}>
           <TouchableOpacity
             style={styles.actionButton}
-            onPress={() => Alert.alert('Info', 'Editar proyecto (próximamente)')}
+            onPress={() => openEditModal(item)}
           >
             <Ionicons name="pencil" size={18} color={colors.textSecondary} />
           </TouchableOpacity>
@@ -299,47 +530,50 @@ export default function ProjectsScreen() {
           renderItem={renderProject}
           keyExtractor={(item) => item.id.toString()}
           contentContainerStyle={styles.listContent}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} />
+          }
         />
       )}
 
-      {/* Botón flotante para crear proyecto */}
+      {/* Botón flotante para crear */}
       <TouchableOpacity
         style={[styles.fab, { backgroundColor: colors.accent }]}
-        onPress={() => setModalVisible(true)}
+        onPress={openCreateModal}
         activeOpacity={0.8}
       >
         <Ionicons name="add" size={28} color="#FFFFFF" />
       </TouchableOpacity>
 
-      {/* Modal de creación */}
+      {/* Modal para crear/editar */}
       <Modal
+        visible={modalVisible}
         animationType="slide"
         transparent={true}
-        visible={modalVisible}
-        onRequestClose={() => setModalVisible(false)}
+        onRequestClose={closeModal}
       >
         <View style={[styles.modalOverlay, { backgroundColor: colors.modalOverlay }]}>
           <View style={[styles.modalContent, { backgroundColor: colors.card }]}>
             {/* Header del modal */}
             <View style={styles.modalHeader}>
-              <Text style={[styles.modalTitle, { color: colors.text }]}>Nuevo Proyecto</Text>
-              <TouchableOpacity onPress={() => setModalVisible(false)}>
-                <Ionicons name="close" size={24} color={colors.textSecondary} />
+              <Text style={[styles.modalTitle, { color: colors.text }]}>
+                {isEditMode ? 'Editar Proyecto' : 'Nuevo Proyecto'}
+              </Text>
+              <TouchableOpacity onPress={closeModal}>
+                <Ionicons name="close" size={28} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
 
-            <ScrollView showsVerticalScrollIndicator={false}>
-              {/* Nombre del proyecto */}
+            <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
+              {/* Nombre */}
               <View style={styles.inputGroup}>
                 <Text style={[styles.label, { color: colors.text }]}>Nombre del Proyecto *</Text>
                 <TextInput
                   style={[styles.input, { backgroundColor: colors.input, borderColor: colors.inputBorder, color: colors.text }]}
                   placeholder="Ej: Proyecto Final"
                   placeholderTextColor={colors.textSecondary}
-                  value={newProject.nombre}
-                  onChangeText={(text) => setNewProject({ ...newProject, nombre: text })}
-                  editable={!creatingProject}
+                  value={projectForm.nombre}
+                  onChangeText={(text) => setProjectForm({ ...projectForm, nombre: text })}
                 />
               </View>
 
@@ -347,55 +581,170 @@ export default function ProjectsScreen() {
               <View style={styles.inputGroup}>
                 <Text style={[styles.label, { color: colors.text }]}>Descripción</Text>
                 <TextInput
-                  style={[styles.textArea, { backgroundColor: colors.input, borderColor: colors.inputBorder, color: colors.text }]}
+                  style={[styles.input, styles.textArea, { backgroundColor: colors.input, borderColor: colors.inputBorder, color: colors.text }]}
                   placeholder="Describe tu proyecto..."
                   placeholderTextColor={colors.textSecondary}
-                  value={newProject.descripcion}
-                  onChangeText={(text) => setNewProject({ ...newProject, descripcion: text })}
+                  value={projectForm.descripcion}
+                  onChangeText={(text) => setProjectForm({ ...projectForm, descripcion: text })}
                   multiline
                   numberOfLines={4}
                   textAlignVertical="top"
-                  editable={!creatingProject}
                 />
               </View>
 
-              {/* Proyecto colaborativo */}
-              <TouchableOpacity
-                style={styles.checkboxContainer}
-                onPress={() =>
-                  setNewProject({ ...newProject, es_colaborativo: !newProject.es_colaborativo })
-                }
-                disabled={creatingProject}
-              >
-                <View style={[styles.checkbox, newProject.es_colaborativo && { backgroundColor: colors.accent, borderColor: colors.accent }]}>
-                  {newProject.es_colaborativo && <Ionicons name="checkmark" size={16} color="#FFFFFF" />}
-                </View>
-                <Text style={[styles.checkboxLabel, { color: colors.text }]}>Proyecto Colaborativo</Text>
-              </TouchableOpacity>
-
-              {/* Botones */}
-              <View style={styles.modalButtons}>
-                <TouchableOpacity
-                  style={[styles.buttonSecondary, { borderColor: colors.inputBorder }]}
-                  onPress={() => setModalVisible(false)}
-                  disabled={creatingProject}
-                >
-                  <Text style={[styles.buttonSecondaryText, { color: colors.textSecondary }]}>Cancelar</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[styles.buttonPrimary, { backgroundColor: colors.accent }, creatingProject && styles.buttonDisabled]}
-                  onPress={handleCreateProject}
-                  disabled={creatingProject}
-                >
-                  {creatingProject ? (
-                    <ActivityIndicator color="#FFFFFF" />
-                  ) : (
-                    <Text style={styles.buttonPrimaryText}>Crear Proyecto</Text>
-                  )}
-                </TouchableOpacity>
+              {/* Proyecto Colaborativo */}
+              <View style={[styles.switchContainer, { backgroundColor: colors.input, borderColor: colors.inputBorder }]}>
+                <Text style={[styles.label, { color: colors.text }]}>Proyecto Colaborativo</Text>
+                <Switch
+                  value={projectForm.es_colaborativo}
+                  onValueChange={toggleCollaborative}
+                  trackColor={{ false: colors.inputBorder, true: colors.accent }}
+                  thumbColor="#FFFFFF"
+                />
               </View>
+
+              {/* Miembros del equipo - SOLO en modo EDITAR y si es colaborativo */}
+              {isEditMode && projectForm.es_colaborativo && (
+                <View style={styles.membersSection}>
+                  <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                    Miembros del Equipo
+                  </Text>
+
+                  {loadingUsers ? (
+                    <ActivityIndicator color={colors.accent} />
+                  ) : (
+                    <>
+                      {/* Selector de miembros */}
+                      <View style={styles.memberSelector}>
+                        <Text style={[styles.label, { color: colors.text }]}>Agregar Miembro</Text>
+
+                        {/* Selector de usuario */}
+                        <View style={styles.pickerGroup}>
+                          <Text style={[styles.pickerLabel, { color: colors.textSecondary }]}>Usuario:</Text>
+                          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.userChipsContainer}>
+                            {availableUsers.map((u) => (
+                              <TouchableOpacity
+                                key={u.id}
+                                style={[
+                                  styles.userChip,
+                                  { 
+                                    backgroundColor: selectedUserId === u.id ? colors.accent : colors.input,
+                                    borderColor: colors.inputBorder,
+                                  },
+                                ]}
+                                onPress={() => setSelectedUserId(u.id)}
+                              >
+                                <View style={[styles.chipAvatar, { backgroundColor: u.color_avatar }]}>
+                                  <Text style={styles.chipInitials}>{u.iniciales}</Text>
+                                </View>
+                                <Text style={[styles.chipName, { color: selectedUserId === u.id ? '#FFFFFF' : colors.text }]} numberOfLines={1}>
+                                  {u.nombre}
+                                </Text>
+                              </TouchableOpacity>
+                            ))}
+                          </ScrollView>
+                        </View>
+
+                        {/* Selector de rol */}
+                        <View style={styles.pickerGroup}>
+                          <Text style={[styles.pickerLabel, { color: colors.textSecondary }]}>Rol:</Text>
+                          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.roleChipsContainer}>
+                            {allRoles
+                              .filter(r => r.nombre !== 'Propietario')
+                              .map((r) => (
+                                <TouchableOpacity
+                                  key={r.id}
+                                  style={[
+                                    styles.roleChip,
+                                    {
+                                      backgroundColor: selectedRoleId === r.id ? colors.accent : colors.input,
+                                      borderColor: colors.inputBorder,
+                                    },
+                                  ]}
+                                  onPress={() => setSelectedRoleId(r.id)}
+                                >
+                                  <Text style={[styles.roleChipText, { color: selectedRoleId === r.id ? '#FFFFFF' : colors.text }]}>
+                                    {r.nombre}
+                                  </Text>
+                                </TouchableOpacity>
+                              ))}
+                          </ScrollView>
+                        </View>
+
+                        {/* Botón agregar */}
+                        <TouchableOpacity
+                          style={[
+                            styles.addButton,
+                            { backgroundColor: colors.accent },
+                            (!selectedUserId || !selectedRoleId) && styles.addButtonDisabled,
+                          ]}
+                          onPress={addMemberToProject}
+                          disabled={!selectedUserId || !selectedRoleId}
+                        >
+                          <Ionicons name="add" size={16} color="#FFFFFF" />
+                          <Text style={styles.addButtonText}>Agregar</Text>
+                        </TouchableOpacity>
+                      </View>
+
+                      {/* Lista de miembros del proyecto */}
+                      {projectMembers.length > 0 && (
+                        <View style={styles.membersList}>
+                          <Text style={[styles.label, { color: colors.text }]}>Miembros Actuales</Text>
+                          {projectMembers.map((member) => (
+                            <View
+                              key={member.usuario.id}
+                              style={[styles.memberItem, { backgroundColor: colors.input, borderColor: colors.inputBorder }]}
+                            >
+                              <View style={styles.memberInfo}>
+                                <View style={[styles.memberAvatar, { backgroundColor: member.usuario.color_avatar }]}>
+                                  <Text style={styles.memberInitials}>{member.usuario.iniciales}</Text>
+                                </View>
+                                <View style={styles.memberDetails}>
+                                  <Text style={[styles.memberName, { color: colors.text }]}>{member.usuario.nombre}</Text>
+                                  <Text style={[styles.memberRole, { color: colors.textSecondary }]}>{member.rol.nombre}</Text>
+                                </View>
+                              </View>
+                              {member.rol.nombre !== 'Propietario' && (
+                                <TouchableOpacity onPress={() => removeMemberFromProject(member.usuario.id)}>
+                                  <Ionicons name="close-circle" size={24} color={colors.danger} />
+                                </TouchableOpacity>
+                              )}
+                            </View>
+                          ))}
+                        </View>
+                      )}
+                    </>
+                  )}
+                </View>
+              )}
             </ScrollView>
+
+            {/* Botones del modal */}
+            <View style={styles.modalFooter}>
+              <TouchableOpacity
+                style={[styles.cancelButton, { borderColor: colors.inputBorder }]}
+                onPress={closeModal}
+              >
+                <Text style={[styles.cancelButtonText, { color: colors.text }]}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.saveButton,
+                  { backgroundColor: colors.accent },
+                  savingProject && styles.saveButtonDisabled,
+                ]}
+                onPress={isEditMode ? updateProject : createProject}
+                disabled={savingProject}
+              >
+                {savingProject ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.saveButtonText}>
+                    {isEditMode ? 'Actualizar' : 'Crear Proyecto'}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -414,16 +763,32 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: 12,
-    fontSize: 14,
+    fontSize: 16,
   },
   listContent: {
     padding: 16,
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 32,
+  },
+  emptyText: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginTop: 16,
+  },
+  emptySubtext: {
+    fontSize: 14,
+    marginTop: 8,
+    textAlign: 'center',
   },
   projectCard: {
     borderRadius: 12,
     borderWidth: 1,
     padding: 16,
-    marginBottom: 12,
+    marginBottom: 16,
   },
   projectHeader: {
     flexDirection: 'row',
@@ -462,7 +827,7 @@ const styles = StyleSheet.create({
   },
   membersContainer: {
     flexDirection: 'row',
-    alignItems: 'center',
+    marginTop: 8,
   },
   memberAvatar: {
     width: 32,
@@ -477,28 +842,12 @@ const styles = StyleSheet.create({
     marginLeft: -8,
   },
   memberAvatarMore: {
-    backgroundColor: '#64748B',
+    marginLeft: -8,
   },
   memberInitials: {
+    color: '#FFFFFF',
     fontSize: 12,
     fontWeight: 'bold',
-    color: '#FFFFFF',
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 40,
-  },
-  emptyText: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  emptySubtext: {
-    fontSize: 14,
-    textAlign: 'center',
   },
   fab: {
     position: 'absolute',
@@ -509,11 +858,11 @@ const styles = StyleSheet.create({
     borderRadius: 28,
     justifyContent: 'center',
     alignItems: 'center',
-    elevation: 4,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
+    shadowOpacity: 0.3,
     shadowRadius: 4,
+    elevation: 5,
   },
   modalOverlay: {
     flex: 1,
@@ -522,18 +871,22 @@ const styles = StyleSheet.create({
   modalContent: {
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    padding: 20,
     maxHeight: '80%',
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#334155',
   },
   modalTitle: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: 'bold',
+  },
+  modalBody: {
+    padding: 20,
   },
   inputGroup: {
     marginBottom: 20,
@@ -551,58 +904,163 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   textArea: {
+    minHeight: 100,
+    textAlignVertical: 'top',
+  },
+  switchContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
     borderRadius: 8,
     borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    fontSize: 16,
-    minHeight: 100,
+    marginBottom: 20,
   },
-  checkboxContainer: {
+  membersSection: {
+    marginTop: 8,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 16,
+  },
+  memberSelector: {
+    marginBottom: 20,
+  },
+  pickerGroup: {
+    marginBottom: 12,
+  },
+  pickerLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  userChipsContainer: {
+    flexDirection: 'row',
+  },
+  userChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 24,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginRight: 8,
+    maxWidth: 150,
   },
-  checkbox: {
+  chipAvatar: {
     width: 24,
     height: 24,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: '#CBD5E1',
+    borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: 8,
   },
-  checkboxLabel: {
-    fontSize: 16,
+  chipInitials: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: 'bold',
   },
-  modalButtons: {
+  chipName: {
+    fontSize: 14,
+    flex: 1,
+  },
+  roleChipsContainer: {
+    flexDirection: 'row',
+  },
+  roleChip: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginRight: 8,
+  },
+  roleChipText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  addButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: 8,
+    gap: 6,
+    marginTop: 8,
+  },
+  addButtonDisabled: {
+    opacity: 0.5,
+  },
+  addButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  membersList: {
+    marginTop: 20,
+    marginBottom:40,
+  },
+  memberItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 8,
+  },
+  memberInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  memberDetails: {
+    marginLeft: 12,
+    flex: 1,
+  },
+  memberName: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  memberRole: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  helperText: {
+    fontSize: 12,
+    fontStyle: 'italic',
+    textAlign: 'center',
+  },
+  modalFooter: {
     flexDirection: 'row',
     gap: 12,
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#334155',
   },
-  buttonSecondary: {
+  cancelButton: {
     flex: 1,
-    paddingVertical: 12,
+    paddingVertical: 14,
     borderRadius: 8,
     borderWidth: 1,
     alignItems: 'center',
   },
-  buttonSecondaryText: {
+  cancelButtonText: {
     fontSize: 16,
     fontWeight: '600',
   },
-  buttonPrimary: {
+  saveButton: {
     flex: 1,
-    paddingVertical: 12,
+    paddingVertical: 14,
     borderRadius: 8,
     alignItems: 'center',
   },
-  buttonPrimaryText: {
+  saveButtonDisabled: {
+    opacity: 0.6,
+  },
+  saveButtonText: {
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
-  },
-  buttonDisabled: {
-    opacity: 0.6,
   },
 });
