@@ -17,6 +17,7 @@ interface AuthContextType {
   isLoading: boolean;
   isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<void>;
+  register: (name: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   checkAuth: () => Promise<void>;
 }
@@ -128,6 +129,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  // Función de registro (igual que tu Vue RegisterForm.vue)
+  const register = async (name: string, email: string, password: string) => {
+    try {
+      setIsLoading(true);
+
+      const response = await fetch(`${API_URL}/api/auth/register`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          nombre: name,
+          email: email,
+          password: password,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!data.success) {
+        throw new Error(data.message || 'Error al registrarse');
+      }
+
+      // Guardar usuario (sin token, como en tu Vue)
+      await storage.setItem(USER_KEY, JSON.stringify(data.user));
+
+      setUser(data.user);
+
+      // Navegar a los tabs
+      router.replace('/(tabs)');
+    } catch (error: any) {
+      console.error('Register error:', error);
+      throw new Error(error.message || 'Error al registrarse');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // Función de logout (igual que tu Vue)
   const logout = async () => {
     try {
@@ -152,6 +191,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     isLoading,
     isAuthenticated: !!user,
     login,
+    register,
     logout,
     checkAuth,
   };

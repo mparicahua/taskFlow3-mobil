@@ -76,7 +76,12 @@ export default function LoginScreen() {
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          
+          {/* Settings Icon */}
+          <View style={styles.headerContainer}>
+            <TouchableOpacity style={styles.settingsButton}>
+              <Ionicons name="settings-outline" size={24} color={colors.textSecondary} />
+            </TouchableOpacity>
+          </View>
 
           {/* Title */}
           <View style={styles.titleContainer}>
@@ -202,7 +207,6 @@ const styles = StyleSheet.create({
   },
   titleContainer: {
     marginBottom: 32,
-    marginTop:52,
   },
   title: {
     fontSize: 32,
