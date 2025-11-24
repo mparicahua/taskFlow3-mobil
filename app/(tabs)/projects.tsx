@@ -1,7 +1,7 @@
 import { useAuth } from '@/contexts/AuthContext';
 import { projectsAPI, usersAPI } from '@/services/api';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
@@ -376,7 +376,8 @@ export default function ProjectsScreen() {
 
   // Abrir proyecto
   const openProject = (project: Project) => {
-    Alert.alert('Info', `Abrir proyecto: ${project.nombre}\n(Próximamente: Tablero Kanban)`);
+    //Alert.alert('Info', `Abrir proyecto: ${project.nombre}\n(Próximamente: Tablero Kanban)`);
+    router.push(`/project/${project.id}` as any);
   };
 
   // Eliminar proyecto
