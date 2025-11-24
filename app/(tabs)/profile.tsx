@@ -2,18 +2,18 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
 import {
-    Alert,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
-    useColorScheme,
+  Alert,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+  useColorScheme,
 } from 'react-native';
 
 export default function ProfileScreen() {
-  const { user, logout } = useAuth();
+  const { user, logout, logoutAll } = useAuth();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
 
@@ -26,6 +26,7 @@ export default function ProfileScreen() {
     textSecondary: isDark ? '#94A3B8' : '#64748B',
     accent: '#3B82F6',
     danger: '#EF4444',
+    warning: '#F59E0B',
   };
 
   const handleLogout = () => {
@@ -40,7 +41,7 @@ export default function ProfileScreen() {
     } else {
       Alert.alert(
         'Cerrar Sesión',
-        '¿Estás seguro que deseas cerrar sesión?',
+        '¿Estás seguro que deseas cerrar sesión en este dispositivo?',
         [
           {
             text: 'Cancelar',
@@ -52,6 +53,42 @@ export default function ProfileScreen() {
             onPress: async () => {
               try {
                 await logout();
+              } catch (error) {
+                Alert.alert('Error', 'No se pudo cerrar sesión');
+              }
+            },
+          },
+        ]
+      );
+    }
+  };
+
+  const handleLogoutAll = () => {
+    if (Platform.OS === 'web') {
+      const confirmed = window.confirm(
+        '¿Estás seguro que deseas cerrar sesión en TODOS los dispositivos?'
+      );
+      if (confirmed) {
+        logoutAll().catch((error) => {
+          alert('No se pudo cerrar sesión');
+          console.error('Logout all error:', error);
+        });
+      }
+    } else {
+      Alert.alert(
+        'Cerrar Sesión en Todos los Dispositivos',
+        'Esto cerrará tu sesión en todos los dispositivos donde hayas iniciado sesión. ¿Estás seguro?',
+        [
+          {
+            text: 'Cancelar',
+            style: 'cancel',
+          },
+          {
+            text: 'Cerrar en Todos',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                await logoutAll();
               } catch (error) {
                 Alert.alert('Error', 'No se pudo cerrar sesión');
               }
@@ -218,8 +255,31 @@ export default function ProfileScreen() {
         </View>
       </View>
 
-      {/* Botón de Cerrar Sesión */}
+      {/* Seguridad */}
       <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>
+          Seguridad
+        </Text>
+
+        {/* Info JWT */}
+        <View style={[styles.infoCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View style={styles.securityInfo}>
+            <Ionicons name="shield-checkmark-outline" size={24} color={colors.accent} />
+            <View style={styles.securityTextContainer}>
+              <Text style={[styles.securityTitle, { color: colors.text }]}>
+                Sesión Protegida con JWT
+              </Text>
+              <Text style={[styles.securityDescription, { color: colors.textSecondary }]}>
+                Tu sesión está protegida con tokens de autenticación seguros
+              </Text>
+            </View>
+          </View>
+        </View>
+      </View>
+
+      {/* Botones de Cerrar Sesión */}
+      <View style={styles.section}>
+        {/* Cerrar sesión en este dispositivo */}
         <TouchableOpacity
           style={[styles.logoutButton, { backgroundColor: colors.danger }]}
           onPress={handleLogout}
@@ -228,6 +288,21 @@ export default function ProfileScreen() {
           <Ionicons name="log-out-outline" size={20} color="#FFFFFF" />
           <Text style={styles.logoutButtonText}>Cerrar Sesión</Text>
         </TouchableOpacity>
+
+        {/* Cerrar sesión en todos los dispositivos */}
+        <TouchableOpacity
+          style={[styles.logoutAllButton, { backgroundColor: colors.warning }]}
+          onPress={handleLogoutAll}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="warning-outline" size={20} color="#FFFFFF" />
+          <Text style={styles.logoutAllButtonText}>Cerrar Sesión en Todos los Dispositivos</Text>
+        </TouchableOpacity>
+
+        <Text style={[styles.logoutHint, { color: colors.textSecondary }]}>
+          "Cerrar sesión" solo cierra tu sesión en este dispositivo.{'\n'}
+          "Cerrar en todos" cierra tu sesión en todos los dispositivos.
+        </Text>
       </View>
 
       {/* Footer */}
@@ -237,6 +312,9 @@ export default function ProfileScreen() {
         </Text>
         <Text style={[styles.footerText, { color: colors.textSecondary }]}>
           Universidad Católica San Pablo
+        </Text>
+        <Text style={[styles.footerText, { color: colors.textSecondary }]}>
+          🔐 Autenticación JWT Habilitada
         </Text>
       </View>
     </ScrollView>
@@ -350,6 +428,22 @@ const styles = StyleSheet.create({
     fontSize: 12,
     textAlign: 'center',
   },
+  securityInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  securityTextContainer: {
+    flex: 1,
+  },
+  securityTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  securityDescription: {
+    fontSize: 12,
+  },
   logoutButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -357,11 +451,32 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderRadius: 12,
     gap: 8,
+    marginBottom: 12,
   },
   logoutButtonText: {
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
+  },
+  logoutAllButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    borderRadius: 12,
+    gap: 8,
+    marginBottom: 12,
+  },
+  logoutAllButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  logoutHint: {
+    fontSize: 12,
+    textAlign: 'center',
+    lineHeight: 18,
+    paddingHorizontal: 10,
   },
   footer: {
     alignItems: 'center',

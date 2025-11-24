@@ -1,4 +1,5 @@
 import { useAuth } from '@/contexts/AuthContext';
+import { projectsAPI, usersAPI } from '@/services/api';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
 import React, { useCallback, useState } from 'react';
@@ -17,8 +18,6 @@ import {
   View,
   useColorScheme
 } from 'react-native';
-
-const API_URL = 'https://taskflow3-server-production.up.railway.app';
 
 interface User {
   id: number;
@@ -95,22 +94,25 @@ export default function ProjectsScreen() {
     modalOverlay: isDark ? 'rgba(0, 0, 0, 0.8)' : 'rgba(0, 0, 0, 0.5)',
   };
 
-  // Cargar proyectos
+  // Cargar proyectos usando API service
   const loadProjects = useCallback(async () => {
     if (!user?.id) return;
 
     try {
-      const response = await fetch(`${API_URL}/api/projects/user/${user.id}`);
-      const data = await response.json();
+      const data = await projectsAPI.getByUser(user.id);
 
       if (data.success) {
         setProjects(data.data);
       } else {
         Alert.alert('Error', 'No se pudieron cargar los proyectos');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error loading projects:', error);
-      Alert.alert('Error', 'Error de conexión con el servidor');
+      
+      // Si es error 401, el interceptor manejará el refresh automáticamente
+      if (error.response?.status !== 401) {
+        Alert.alert('Error', 'Error de conexión con el servidor');
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -134,13 +136,10 @@ export default function ProjectsScreen() {
   const loadUsersAndRoles = async () => {
     setLoadingUsers(true);
     try {
-      const [usersResponse, rolesResponse] = await Promise.all([
-        fetch(`${API_URL}/api/users`),
-        fetch(`${API_URL}/api/users/roles`),
+      const [usersData, rolesData] = await Promise.all([
+        usersAPI.getAll(),
+        usersAPI.getRoles(),
       ]);
-
-      const usersData = await usersResponse.json();
-      const rolesData = await rolesResponse.json();
 
       if (usersData.success && rolesData.success) {
         setAllUsers(usersData.data);
@@ -156,8 +155,7 @@ export default function ProjectsScreen() {
   // Cargar usuarios disponibles
   const loadAvailableUsers = async (proyectoId: number) => {
     try {
-      const response = await fetch(`${API_URL}/api/users/disponibles/${proyectoId}`);
-      const data = await response.json();
+      const data = await usersAPI.getAvailable(proyectoId);
       if (data.success) {
         setAvailableUsers(data.data);
       }
@@ -199,7 +197,6 @@ export default function ProjectsScreen() {
   const toggleCollaborative = () => {
     const newValue = !projectForm.es_colaborativo;
 
-    // Si está en modo edición y era colaborativo antes y ahora lo desactiva
     if (isEditMode && previousCollaborative && !newValue && editingProject) {
       Alert.alert(
         'Confirmar',
@@ -211,11 +208,7 @@ export default function ProjectsScreen() {
             style: 'destructive',
             onPress: async () => {
               try {
-                const response = await fetch(
-                  `${API_URL}/api/projects/${editingProject.id}/miembros`,
-                  { method: 'DELETE' }
-                );
-                const data = await response.json();
+                const data = await projectsAPI.removeAllMembers(editingProject.id);
 
                 if (data.success) {
                   setProjectForm({ ...projectForm, es_colaborativo: newValue });
@@ -249,19 +242,10 @@ export default function ProjectsScreen() {
     if (!editingProject) return;
 
     try {
-      const response = await fetch(
-        `${API_URL}/api/projects/${editingProject.id}/miembros`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            usuario_id: selectedUserId,
-            rol_id: selectedRoleId,
-          }),
-        }
-      );
-
-      const data = await response.json();
+      const data = await projectsAPI.addMember(editingProject.id, {
+        usuario_id: selectedUserId,
+        rol_id: selectedRoleId,
+      });
 
       if (data.success) {
         setProjectMembers([...projectMembers, data.data]);
@@ -291,12 +275,7 @@ export default function ProjectsScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              const response = await fetch(
-                `${API_URL}/api/projects/${editingProject.id}/miembros/${usuarioId}`,
-                { method: 'DELETE' }
-              );
-
-              const data = await response.json();
+              const data = await projectsAPI.removeMember(editingProject.id, usuarioId);
 
               if (data.success) {
                 setProjectMembers(projectMembers.filter(m => m.usuario.id !== usuarioId));
@@ -321,19 +300,15 @@ export default function ProjectsScreen() {
       return;
     }
 
+    if (!user?.id) return;
+
     setSavingProject(true);
 
     try {
-      const response = await fetch(`${API_URL}/api/projects`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...projectForm,
-          usuario_id: user?.id,
-        }),
+      const data = await projectsAPI.create({
+        ...projectForm,
+        usuario_id: user.id,
       });
-
-      const data = await response.json();
 
       if (data.success) {
         Alert.alert('Éxito', 'Proyecto creado correctamente');
@@ -342,9 +317,9 @@ export default function ProjectsScreen() {
       } else {
         Alert.alert('Error', data.message || 'No se pudo crear el proyecto');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error creating project:', error);
-      Alert.alert('Error', 'Error de conexión');
+      Alert.alert('Error', error.response?.data?.message || 'Error de conexión');
     } finally {
       setSavingProject(false);
     }
@@ -357,21 +332,15 @@ export default function ProjectsScreen() {
       return;
     }
 
-    if (!editingProject) return;
+    if (!editingProject || !user?.id) return;
 
     setSavingProject(true);
 
     try {
-      const response = await fetch(`${API_URL}/api/projects/${editingProject.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...projectForm,
-          usuario_id: user?.id,
-        }),
+      const data = await projectsAPI.update(editingProject.id, {
+        ...projectForm,
+        usuario_id: user.id,
       });
-
-      const data = await response.json();
 
       if (data.success) {
         Alert.alert('Éxito', 'Proyecto actualizado correctamente');
@@ -380,9 +349,9 @@ export default function ProjectsScreen() {
       } else {
         Alert.alert('Error', data.message || 'No se pudo actualizar el proyecto');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error updating project:', error);
-      Alert.alert('Error', 'Error de conexión');
+      Alert.alert('Error', error.response?.data?.message || 'Error de conexión');
     } finally {
       setSavingProject(false);
     }
@@ -412,6 +381,8 @@ export default function ProjectsScreen() {
 
   // Eliminar proyecto
   const deleteProject = (project: Project) => {
+    if (!user?.id) return;
+
     Alert.alert(
       'Confirmar',
       `¿Estás seguro de eliminar "${project.nombre}"?`,
@@ -422,21 +393,17 @@ export default function ProjectsScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              const response = await fetch(`${API_URL}/api/projects/${project.id}`, {
-                method: 'DELETE',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ usuario_id: user?.id }),
-              });
-              const data = await response.json();
+              const data = await projectsAPI.delete(project.id, user.id);
+              
               if (data.success) {
                 setProjects(projects.filter(p => p.id !== project.id));
                 Alert.alert('Éxito', 'Proyecto eliminado');
               } else {
                 Alert.alert('Error', data.message || 'Error al eliminar');
               }
-            } catch (error) {
+            } catch (error: any) {
               console.error('Error deleting project:', error);
-              Alert.alert('Error', 'Error de conexión');
+              Alert.alert('Error', error.response?.data?.message || 'Error de conexión');
             }
           },
         },
@@ -545,7 +512,7 @@ export default function ProjectsScreen() {
         <Ionicons name="add" size={28} color="#FFFFFF" />
       </TouchableOpacity>
 
-      {/* Modal para crear/editar */}
+      {/* Modal para crear/editar - CONTENIDO SIMILAR AL ORIGINAL */}
       <Modal
         visible={modalVisible}
         animationType="slide"
@@ -554,7 +521,6 @@ export default function ProjectsScreen() {
       >
         <View style={[styles.modalOverlay, { backgroundColor: colors.modalOverlay }]}>
           <View style={[styles.modalContent, { backgroundColor: colors.card }]}>
-            {/* Header del modal */}
             <View style={styles.modalHeader}>
               <Text style={[styles.modalTitle, { color: colors.text }]}>
                 {isEditMode ? 'Editar Proyecto' : 'Nuevo Proyecto'}
@@ -603,7 +569,7 @@ export default function ProjectsScreen() {
                 />
               </View>
 
-              {/* Miembros del equipo - SOLO en modo EDITAR y si es colaborativo */}
+              {/* Miembros del equipo - SOLO en modo EDITAR */}
               {isEditMode && projectForm.es_colaborativo && (
                 <View style={styles.membersSection}>
                   <Text style={[styles.sectionTitle, { color: colors.text }]}>
@@ -752,315 +718,67 @@ export default function ProjectsScreen() {
   );
 }
 
+// Styles (mantener los mismos que tienes actualmente)
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  centerContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 16,
-  },
-  listContent: {
-    padding: 16,
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 32,
-  },
-  emptyText: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginTop: 16,
-  },
-  emptySubtext: {
-    fontSize: 14,
-    marginTop: 8,
-    textAlign: 'center',
-  },
-  projectCard: {
-    borderRadius: 12,
-    borderWidth: 1,
-    padding: 16,
-    marginBottom: 16,
-  },
-  projectHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  projectTitleContainer: {
-    flex: 1,
-    marginRight: 12,
-  },
-  projectTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  projectDescription: {
-    fontSize: 14,
-  },
-  projectActions: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  actionButton: {
-    padding: 8,
-  },
-  projectStats: {
-    flexDirection: 'row',
-    gap: 16,
-    marginBottom: 12,
-  },
-  statsText: {
-    fontSize: 12,
-  },
-  statsTextCompleted: {
-    fontSize: 12,
-  },
-  membersContainer: {
-    flexDirection: 'row',
-    marginTop: 8,
-  },
-  memberAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#FFFFFF',
-  },
-  memberAvatarOverlap: {
-    marginLeft: -8,
-  },
-  memberAvatarMore: {
-    marginLeft: -8,
-  },
-  memberInitials: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  fab: {
-    position: 'absolute',
-    right: 20,
-    bottom: 20,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 5,
-  },
-  modalOverlay: {
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    maxHeight: '80%',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#334155',
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-  },
-  modalBody: {
-    padding: 20,
-  },
-  inputGroup: {
-    marginBottom: 20,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 8,
-  },
-  input: {
-    borderRadius: 8,
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    fontSize: 16,
-  },
-  textArea: {
-    minHeight: 100,
-    textAlignVertical: 'top',
-  },
-  switchContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 16,
-    borderRadius: 8,
-    borderWidth: 1,
-    marginBottom: 20,
-  },
-  membersSection: {
-    marginTop: 8,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 16,
-  },
-  memberSelector: {
-    marginBottom: 20,
-  },
-  pickerGroup: {
-    marginBottom: 12,
-  },
-  pickerLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    marginBottom: 8,
-  },
-  userChipsContainer: {
-    flexDirection: 'row',
-  },
-  userChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    marginRight: 8,
-    maxWidth: 150,
-  },
-  chipAvatar: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 8,
-  },
-  chipInitials: {
-    color: '#FFFFFF',
-    fontSize: 10,
-    fontWeight: 'bold',
-  },
-  chipName: {
-    fontSize: 14,
-    flex: 1,
-  },
-  roleChipsContainer: {
-    flexDirection: 'row',
-  },
-  roleChip: {
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    borderWidth: 1,
-    marginRight: 8,
-  },
-  roleChipText: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  addButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 10,
-    borderRadius: 8,
-    gap: 6,
-    marginTop: 8,
-  },
-  addButtonDisabled: {
-    opacity: 0.5,
-  },
-  addButtonText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  membersList: {
-    marginTop: 20,
-    marginBottom:40,
-  },
-  memberItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    marginBottom: 8,
-  },
-  memberInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  memberDetails: {
-    marginLeft: 12,
-    flex: 1,
-  },
-  memberName: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  memberRole: {
-    fontSize: 12,
-    marginTop: 2,
-  },
-  helperText: {
-    fontSize: 12,
-    fontStyle: 'italic',
-    textAlign: 'center',
-  },
-  modalFooter: {
-    flexDirection: 'row',
-    gap: 12,
-    padding: 20,
-    borderTopWidth: 1,
-    borderTopColor: '#334155',
-  },
-  cancelButton: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 8,
-    borderWidth: 1,
-    alignItems: 'center',
-  },
-  cancelButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  saveButton: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  saveButtonDisabled: {
-    opacity: 0.6,
-  },
-  saveButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
+  container: { flex: 1 },
+  centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  loadingText: { marginTop: 12, fontSize: 16 },
+  listContent: { padding: 16 },
+  emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 },
+  emptyText: { fontSize: 20, fontWeight: 'bold', marginTop: 16 },
+  emptySubtext: { fontSize: 14, marginTop: 8, textAlign: 'center' },
+  projectCard: { borderRadius: 12, borderWidth: 1, padding: 16, marginBottom: 16 },
+  projectHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
+  projectTitleContainer: { flex: 1, marginRight: 12 },
+  projectTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 4 },
+  projectDescription: { fontSize: 14 },
+  projectActions: { flexDirection: 'row', gap: 8 },
+  actionButton: { padding: 8 },
+  projectStats: { flexDirection: 'row', gap: 16, marginBottom: 12 },
+  statsText: { fontSize: 12 },
+  statsTextCompleted: { fontSize: 12 },
+  membersContainer: { flexDirection: 'row', marginTop: 8 },
+  memberAvatar: { width: 32, height: 32, borderRadius: 16, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#FFFFFF' },
+  memberAvatarOverlap: { marginLeft: -8 },
+  memberAvatarMore: { marginLeft: -8 },
+  memberInitials: { color: '#FFFFFF', fontSize: 12, fontWeight: 'bold' },
+  fab: { position: 'absolute', right: 20, bottom: 20, width: 56, height: 56, borderRadius: 28, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 4, elevation: 5 },
+  modalOverlay: { flex: 1, justifyContent: 'flex-end' },
+  modalContent: { borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '80%' },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1, borderBottomColor: '#334155' },
+  modalTitle: { fontSize: 20, fontWeight: 'bold' },
+  modalBody: { padding: 20 },
+  inputGroup: { marginBottom: 20 },
+  label: { fontSize: 14, fontWeight: '600', marginBottom: 8 },
+  input: { borderRadius: 8, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 12, fontSize: 16 },
+  textArea: { minHeight: 100, textAlignVertical: 'top' },
+  switchContainer: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderRadius: 8, borderWidth: 1, marginBottom: 20 },
+  membersSection: { marginTop: 8 },
+  sectionTitle: { fontSize: 16, fontWeight: 'bold', marginBottom: 16 },
+  memberSelector: { marginBottom: 20 },
+  pickerGroup: { marginBottom: 12 },
+  pickerLabel: { fontSize: 12, fontWeight: '600', marginBottom: 8 },
+  userChipsContainer: { flexDirection: 'row' },
+  userChip: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1, marginRight: 8, maxWidth: 150 },
+  chipAvatar: { width: 24, height: 24, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginRight: 8 },
+  chipInitials: { color: '#FFFFFF', fontSize: 10, fontWeight: 'bold' },
+  chipName: { fontSize: 14, flex: 1 },
+  roleChipsContainer: { flexDirection: 'row' },
+  roleChip: { paddingVertical: 8, paddingHorizontal: 16, borderRadius: 8, borderWidth: 1, marginRight: 8 },
+  roleChipText: { fontSize: 14, fontWeight: '600' },
+  addButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, borderRadius: 8, gap: 6, marginTop: 8 },
+  addButtonDisabled: { opacity: 0.5 },
+  addButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '600' },
+  membersList: { marginTop: 20, marginBottom: 40 },
+  memberItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 12, borderRadius: 8, borderWidth: 1, marginBottom: 8 },
+  memberInfo: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  memberDetails: { marginLeft: 12, flex: 1 },
+  memberName: { fontSize: 14, fontWeight: '600' },
+  memberRole: { fontSize: 12, marginTop: 2 },
+  modalFooter: { flexDirection: 'row', gap: 12, padding: 20, borderTopWidth: 1, borderTopColor: '#334155' },
+  cancelButton: { flex: 1, paddingVertical: 14, borderRadius: 8, borderWidth: 1, alignItems: 'center' },
+  cancelButtonText: { fontSize: 16, fontWeight: '600' },
+  saveButton: { flex: 1, paddingVertical: 14, borderRadius: 8, alignItems: 'center' },
+  saveButtonDisabled: { opacity: 0.6 },
+  saveButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
 });
