@@ -1,7 +1,17 @@
 import axios, { AxiosError, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
+import EventEmitter from 'eventemitter3';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
+// ==================== EVENT EMITTER ====================
+// Event emitter para comunicar eventos de autenticación
+export const authEvents = new EventEmitter();
+
+// Eventos disponibles:
+// - 'session-expired': Cuando la sesión expira (refresh token inválido)
+// - 'token-refreshed': Cuando el token se refresca exitosamente
+
+// ==================== CONFIGURACIÓN ====================
 // URL del servidor
 const API_URL = 'https://taskflow3-server-production.up.railway.app';
 
@@ -10,6 +20,7 @@ const ACCESS_TOKEN_KEY = 'access_token';
 const REFRESH_TOKEN_KEY = 'refresh_token';
 const USER_KEY = 'user_data';
 
+// ==================== STORAGE HELPER ====================
 // Helper para almacenamiento multiplataforma
 const storage = {
   async getItem(key: string): Promise<string | null> {
@@ -37,6 +48,7 @@ const storage = {
   }
 };
 
+// ==================== AXIOS INSTANCE ====================
 // Crear instancia de Axios
 const api = axios.create({
   baseURL: API_URL,
@@ -46,6 +58,7 @@ const api = axios.create({
   },
 });
 
+// ==================== REFRESH TOKEN LOGIC ====================
 // Variable para evitar múltiples refreshes simultáneos
 let isRefreshing = false;
 let failedQueue: Array<{
@@ -73,6 +86,11 @@ api.interceptors.request.use(
     
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
+      
+      // Log en desarrollo
+      if (__DEV__) {
+        console.log('🔐 Request con token:', config.url);
+      }
     }
     
     return config;
@@ -91,10 +109,20 @@ api.interceptors.response.use(
   async (error: AxiosError) => {
     const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
 
-    // Si el error es 401 (Unauthorized) y no hemos intentado refrescar
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    // Si el error es 401 (Unauthorized) o 403 (Forbidden/Invalid Token)
+    if ((error.response?.status === 401 || error.response?.status === 403) && !originalRequest._retry) {
+      
+      // Log en desarrollo
+      if (__DEV__) {
+        console.log(`⚠️ Token error ${error.response?.status} detectado en:`, originalRequest.url);
+      }
+
       if (isRefreshing) {
         // Si ya estamos refrescando, agregar a la cola
+        if (__DEV__) {
+          console.log('⏳ Agregando a cola de espera...');
+        }
+        
         return new Promise((resolve, reject) => {
           failedQueue.push({ resolve, reject });
         })
@@ -111,6 +139,10 @@ api.interceptors.response.use(
       isRefreshing = true;
 
       try {
+        if (__DEV__) {
+          console.log('🔄 Intentando refrescar token...');
+        }
+
         const refreshToken = await storage.getItem(REFRESH_TOKEN_KEY);
 
         if (!refreshToken) {
@@ -125,6 +157,10 @@ api.interceptors.response.use(
         if (response.data.success) {
           const { accessToken } = response.data;
 
+          if (__DEV__) {
+            console.log('✅ Token refrescado exitosamente');
+          }
+
           // Guardar nuevo access token
           await storage.setItem(ACCESS_TOKEN_KEY, accessToken);
 
@@ -134,25 +170,38 @@ api.interceptors.response.use(
           // Procesar cola de peticiones pendientes
           processQueue(null, accessToken);
 
+          // Emitir evento de token refrescado
+          authEvents.emit('token-refreshed');
+
           // Reintentar la petición original
           return api(originalRequest);
         } else {
           throw new Error('Failed to refresh token');
         }
-      } catch (refreshError) {
-        // Si falla el refresh, limpiar todo y redirigir a login
+      } catch (refreshError: any) {
+        // ==================== SESIÓN EXPIRADA ====================
+        if (__DEV__) {
+          console.log('❌ Refresh token falló:', refreshError.message);
+          console.log('🚪 Limpiando sesión y emitiendo evento...');
+        }
+
+        // Procesar cola de peticiones pendientes con error
         processQueue(refreshError as Error, null);
         
+        // Limpiar tokens del storage
         await storage.removeItem(ACCESS_TOKEN_KEY);
         await storage.removeItem(REFRESH_TOKEN_KEY);
         await storage.removeItem(USER_KEY);
 
+        // ==================== EMITIR EVENTO ====================
         // Emitir evento para que AuthContext maneje la redirección
-        // (Se puede usar EventEmitter o un callback global)
-        if (Platform.OS === 'web') {
-          window.location.href = '/login';
-        }
-        
+        authEvents.emit('session-expired', {
+          reason: refreshError.response?.status === 403 
+            ? 'Tu sesión expiró por inactividad' 
+            : 'Tu sesión ha expirado',
+          error: refreshError
+        });
+
         return Promise.reject(refreshError);
       } finally {
         isRefreshing = false;
@@ -385,6 +434,6 @@ export const tagsAPI = {
 // Exportar la instancia de axios por si se necesita usar directamente
 export default api;
 
-// Exportar storage para uso en AuthContext
+// Exportar storage y keys para uso en AuthContext
 export { ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY, storage, USER_KEY };
 
