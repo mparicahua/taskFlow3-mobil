@@ -2,6 +2,7 @@ import { router } from 'expo-router';
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Alert, Platform } from 'react-native';
 
+import { setupProjectListeners } from '@/contexts/ProjectContext';
 import {
   ACCESS_TOKEN_KEY,
   REFRESH_TOKEN_KEY,
@@ -10,6 +11,7 @@ import {
   authEvents,
   storage,
 } from '@/services/api';
+import { socketService } from '@/services/socket';
 
 // Tipos basados en tu servidor TaskFlow3
 interface User {
@@ -40,14 +42,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   // ==================== LISTENER DE EVENTOS ====================
-  // Escuchar eventos de sesión expirada
   useEffect(() => {
     const handleSessionExpired = (data: { reason: string; error: any }) => {
       if (__DEV__) {
         console.log('🚪 Evento de sesión expirada recibido:', data.reason);
       }
 
-      // Mostrar alert antes de redirigir
       if (Platform.OS === 'web') {
         alert(data.reason);
         clearSessionSync();
@@ -76,11 +76,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
-    // Registrar listeners
     authEvents.on('session-expired', handleSessionExpired);
     authEvents.on('token-refreshed', handleTokenRefreshed);
 
-    // Cleanup al desmontar
     return () => {
       authEvents.off('session-expired', handleSessionExpired);
       authEvents.off('token-refreshed', handleTokenRefreshed);
@@ -93,31 +91,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // ==================== CHECK AUTH ====================
-  // Función para verificar si hay una sesión guardada al iniciar la app
   const checkAuth = async () => {
     try {
       setIsLoading(true);
       
-      // Verificar si hay tokens guardados
       const accessToken = await storage.getItem(ACCESS_TOKEN_KEY);
       const refreshToken = await storage.getItem(REFRESH_TOKEN_KEY);
       const storedUser = await storage.getItem(USER_KEY);
 
       if (accessToken && refreshToken && storedUser) {
-        // Hay sesión guardada, verificar que el token sea válido
         const isValid = await verifyToken();
         
         if (isValid) {
-          // Token válido, restaurar usuario
           setUser(JSON.parse(storedUser));
+          
+          // ✨ CONECTAR SOCKET Y CONFIGURAR LISTENERS
+          socketService.connect(accessToken);
+          
+          // Esperar un poco para que el socket se conecte
+          setTimeout(() => {
+            setupProjectListeners();
+          }, 100);
+          
           router.replace('/(tabs)');
         } else {
-          // Token inválido, limpiar e ir a login
           await clearSession();
           router.replace('/login');
         }
       } else {
-        // No hay sesión, ir a login
         router.replace('/login');
       }
     } catch (error) {
@@ -130,7 +131,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   // ==================== VERIFY TOKEN ====================
-  // Verificar si el token actual es válido
   const verifyToken = async (): Promise<boolean> => {
     try {
       const response = await authAPI.verify();
@@ -144,7 +144,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   // ==================== LOGIN ====================
-  // Función de login con JWT
   const login = async (email: string, password: string) => {
     try {
       setIsLoading(true);
@@ -155,7 +154,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         throw new Error(data.message || 'Error al iniciar sesión');
       }
 
-      // Guardar tokens y usuario
       await storage.setItem(ACCESS_TOKEN_KEY, data.accessToken);
       await storage.setItem(REFRESH_TOKEN_KEY, data.refreshToken);
       await storage.setItem(USER_KEY, JSON.stringify(data.user));
@@ -166,12 +164,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.log('✅ Login exitoso:', data.user.nombre);
       }
 
-      // Navegar a los tabs
+      // ✨ CONECTAR SOCKET Y CONFIGURAR LISTENERS
+      socketService.connect(data.accessToken);
+      
+      setTimeout(() => {
+        setupProjectListeners();
+      }, 100);
+
       router.replace('/(tabs)');
     } catch (error: any) {
       console.error('Login error:', error);
       
-      // Extraer mensaje de error
       const errorMessage = 
         error.response?.data?.message || 
         error.message || 
@@ -184,7 +187,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   // ==================== REGISTER ====================
-  // Función de registro con JWT
   const register = async (name: string, email: string, password: string) => {
     try {
       setIsLoading(true);
@@ -195,7 +197,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         throw new Error(data.message || 'Error al registrarse');
       }
 
-      // Guardar tokens y usuario
       await storage.setItem(ACCESS_TOKEN_KEY, data.accessToken);
       await storage.setItem(REFRESH_TOKEN_KEY, data.refreshToken);
       await storage.setItem(USER_KEY, JSON.stringify(data.user));
@@ -206,12 +207,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.log('✅ Registro exitoso:', data.user.nombre);
       }
 
-      // Navegar a los tabs
+      // ✨ CONECTAR SOCKET Y CONFIGURAR LISTENERS
+      socketService.connect(data.accessToken);
+      
+      setTimeout(() => {
+        setupProjectListeners();
+      }, 100);
+
       router.replace('/(tabs)');
     } catch (error: any) {
       console.error('Register error:', error);
       
-      // Extraer mensaje de error
       const errorMessage = 
         error.response?.data?.message || 
         error.message || 
@@ -224,17 +230,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   // ==================== LOGOUT ====================
-  // Función de logout (cierra sesión actual)
   const logout = async () => {
     try {
       setIsLoading(true);
       
-      // Obtener refresh token para enviarlo al servidor
       const refreshToken = await storage.getItem(REFRESH_TOKEN_KEY);
       
       if (refreshToken) {
         try {
-          // Notificar al servidor para invalidar el refresh token
           await authAPI.logout(refreshToken);
           
           if (__DEV__) {
@@ -242,25 +245,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         } catch (error) {
           console.error('Error notifying server about logout:', error);
-          // Continuar con el logout local aunque falle el servidor
         }
       }
 
-      // Limpiar datos locales
+      // ✨ DESCONECTAR SOCKET
+      socketService.disconnect();
+      
       await clearSession();
 
-      // Mostrar confirmación
       if (Platform.OS === 'web') {
         alert('Sesión cerrada correctamente');
       } else {
         Alert.alert('Sesión Cerrada', 'Has cerrado sesión correctamente');
       }
 
-      // Navegar a login
       router.replace('/login');
     } catch (error) {
       console.error('Logout error:', error);
-      // Forzar limpieza local en caso de error
       await clearSession();
       router.replace('/login');
     } finally {
@@ -269,17 +270,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   // ==================== LOGOUT ALL ====================
-  // Función de logout all (cierra todas las sesiones)
   const logoutAll = async () => {
     try {
       setIsLoading(true);
       
-      // Obtener refresh token para enviarlo al servidor
       const refreshToken = await storage.getItem(REFRESH_TOKEN_KEY);
       
       if (refreshToken) {
         try {
-          // Notificar al servidor para invalidar TODOS los refresh tokens del usuario
           await authAPI.logoutAll(refreshToken);
           
           if (__DEV__) {
@@ -287,14 +285,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         } catch (error) {
           console.error('Error notifying server about logout all:', error);
-          // Continuar con el logout local aunque falle el servidor
         }
       }
 
-      // Limpiar datos locales
+      // ✨ DESCONECTAR SOCKET
+      socketService.disconnect();
+      
       await clearSession();
 
-      // Mostrar confirmación
       if (Platform.OS === 'web') {
         alert('Sesión cerrada en todos los dispositivos');
       } else {
@@ -304,11 +302,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         );
       }
 
-      // Navegar a login
       router.replace('/login');
     } catch (error) {
       console.error('Logout all error:', error);
-      // Forzar limpieza local en caso de error
       await clearSession();
       router.replace('/login');
     } finally {
@@ -317,7 +313,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   // ==================== CLEAR SESSION ====================
-  // Función auxiliar para limpiar toda la sesión local
   const clearSession = async () => {
     await storage.removeItem(ACCESS_TOKEN_KEY);
     await storage.removeItem(REFRESH_TOKEN_KEY);
@@ -329,7 +324,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  // Función sincrónica para web
   const clearSessionSync = () => {
     if (Platform.OS === 'web') {
       localStorage.removeItem(ACCESS_TOKEN_KEY);
@@ -356,7 +350,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 }
 
 // ==================== HOOK ====================
-// Hook para usar el contexto
 export function useAuth() {
   const context = useContext(AuthContext);
   if (context === undefined) {

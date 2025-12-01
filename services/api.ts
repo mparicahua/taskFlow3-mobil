@@ -14,6 +14,7 @@ export const authEvents = new EventEmitter();
 // ==================== CONFIGURACIÓN ====================
 // URL del servidor
 const API_URL = 'https://taskflow3-server-production.up.railway.app';
+//const API_URL = 'http://localhost:3000';
 
 // Claves para almacenamiento
 const ACCESS_TOKEN_KEY = 'access_token';
@@ -52,7 +53,7 @@ const storage = {
 // Crear instancia de Axios
 const api = axios.create({
   baseURL: API_URL,
-  timeout: 10000,
+  timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
   },

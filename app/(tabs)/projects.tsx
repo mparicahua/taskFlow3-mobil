@@ -1,5 +1,6 @@
 import { useAuth } from '@/contexts/AuthContext';
-import { projectsAPI, usersAPI } from '@/services/api';
+import { useProjects } from '@/contexts/ProjectContext';
+import { usersAPI } from '@/services/api';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import React, { useCallback, useState } from 'react';
@@ -8,6 +9,7 @@ import {
   Alert,
   FlatList,
   Modal,
+  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -51,8 +53,16 @@ export default function ProjectsScreen() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [loading, setLoading] = useState(true);
+  // ✅ USAR CONTEXTO DE PROYECTOS
+  const { 
+    projects, 
+    loading, 
+    fetchProjects, 
+    createProject: createProjectContext,
+    updateProject: updateProjectContext,
+    deleteProject: deleteProjectContext
+  } = useProjects();
+  
   const [refreshing, setRefreshing] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [savingProject, setSavingProject] = useState(false);
@@ -94,42 +104,37 @@ export default function ProjectsScreen() {
     modalOverlay: isDark ? 'rgba(0, 0, 0, 0.8)' : 'rgba(0, 0, 0, 0.5)',
   };
 
-  // Cargar proyectos usando API service
-  const loadProjects = useCallback(async () => {
-    if (!user?.id) return;
-
-    try {
-      const data = await projectsAPI.getByUser(user.id);
-
-      if (data.success) {
-        setProjects(data.data);
-      } else {
-        Alert.alert('Error', 'No se pudieron cargar los proyectos');
-      }
-    } catch (error: any) {
-      console.error('Error loading projects:', error);
-      
-      // Si es error 401, el interceptor manejará el refresh automáticamente
-      if (error.response?.status !== 401) {
-        Alert.alert('Error', 'Error de conexión con el servidor');
-      }
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [user?.id]);
-
-  // Recargar al enfocar
+  // ✅ RECARGAR AL ENFOCAR - SIN BUCLE
   useFocusEffect(
     useCallback(() => {
-      loadProjects();
-    }, [loadProjects])
+      if (user?.id) {
+        fetchProjects(user.id).catch(err => {
+          console.error('Error loading projects:', err);
+          if (err.response?.status !== 401) {
+            Alert.alert('Error', 'Error de conexión con el servidor');
+          }
+        });
+      }
+    }, [user?.id]) // ✨ SOLO user?.id como dependencia
   );
 
-  // Refresh manual
-  const onRefresh = () => {
+  // ✅ REFRESH MANUAL - SIN BUCLE
+  const onRefresh = async () => {
     setRefreshing(true);
-    loadProjects();
+    if (user?.id) {
+      try {
+        await fetchProjects(user.id);
+      } catch (error: any) {
+        console.error('Error refreshing:', error);
+        if (error.response?.status !== 401) {
+          Alert.alert('Error', 'Error de conexión con el servidor');
+        }
+      } finally {
+        setRefreshing(false);
+      }
+    } else {
+      setRefreshing(false);
+    }
   };
 
   // Cargar usuarios y roles
@@ -208,17 +213,11 @@ export default function ProjectsScreen() {
             style: 'destructive',
             onPress: async () => {
               try {
-                const data = await projectsAPI.removeAllMembers(editingProject.id);
-
-                if (data.success) {
-                  setProjectForm({ ...projectForm, es_colaborativo: newValue });
-                  setProjectMembers(
-                    projectMembers.filter(m => m.rol.nombre === 'Propietario')
-                  );
-                  await loadAvailableUsers(editingProject.id);
-                } else {
-                  Alert.alert('Error', data.message || 'Error al eliminar miembros');
-                }
+                setProjectForm({ ...projectForm, es_colaborativo: newValue });
+                setProjectMembers(
+                  projectMembers.filter(m => m.rol.nombre === 'Propietario')
+                );
+                await loadAvailableUsers(editingProject.id);
               } catch (error) {
                 console.error('Error:', error);
                 Alert.alert('Error', 'Error al eliminar miembros');
@@ -242,18 +241,19 @@ export default function ProjectsScreen() {
     if (!editingProject) return;
 
     try {
-      const data = await projectsAPI.addMember(editingProject.id, {
-        usuario_id: selectedUserId,
-        rol_id: selectedRoleId,
-      });
-
-      if (data.success) {
-        setProjectMembers([...projectMembers, data.data]);
+      const selectedUser = allUsers.find(u => u.id === selectedUserId);
+      const selectedRole = allRoles.find(r => r.id === selectedRoleId);
+      
+      if (selectedUser && selectedRole) {
+        const newMember: ProjectMember = {
+          usuario: selectedUser,
+          rol: selectedRole
+        };
+        
+        setProjectMembers([...projectMembers, newMember]);
         await loadAvailableUsers(editingProject.id);
         setSelectedUserId(null);
         setSelectedRoleId(null);
-      } else {
-        Alert.alert('Error', data.message || 'Error al agregar miembro');
       }
     } catch (error) {
       console.error('Error:', error);
@@ -275,14 +275,8 @@ export default function ProjectsScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              const data = await projectsAPI.removeMember(editingProject.id, usuarioId);
-
-              if (data.success) {
-                setProjectMembers(projectMembers.filter(m => m.usuario.id !== usuarioId));
-                await loadAvailableUsers(editingProject.id);
-              } else {
-                Alert.alert('Error', data.message || 'Error al eliminar miembro');
-              }
+              setProjectMembers(projectMembers.filter(m => m.usuario.id !== usuarioId));
+              await loadAvailableUsers(editingProject.id);
             } catch (error) {
               console.error('Error:', error);
               Alert.alert('Error', 'Error al eliminar miembro');
@@ -293,7 +287,7 @@ export default function ProjectsScreen() {
     );
   };
 
-  // Crear proyecto
+  // ✅ CREAR PROYECTO USANDO CONTEXTO
   const createProject = async () => {
     if (!projectForm.nombre.trim()) {
       Alert.alert('Error', 'El nombre del proyecto es requerido');
@@ -305,17 +299,14 @@ export default function ProjectsScreen() {
     setSavingProject(true);
 
     try {
-      const data = await projectsAPI.create({
+      const result = await createProjectContext({
         ...projectForm,
         usuario_id: user.id,
       });
 
-      if (data.success) {
+      if (result.success) {
         Alert.alert('Éxito', 'Proyecto creado correctamente');
         closeModal();
-        loadProjects();
-      } else {
-        Alert.alert('Error', data.message || 'No se pudo crear el proyecto');
       }
     } catch (error: any) {
       console.error('Error creating project:', error);
@@ -325,7 +316,7 @@ export default function ProjectsScreen() {
     }
   };
 
-  // Editar proyecto
+  // ✅ EDITAR PROYECTO USANDO CONTEXTO
   const updateProject = async () => {
     if (!projectForm.nombre.trim()) {
       Alert.alert('Error', 'El nombre del proyecto es requerido');
@@ -337,17 +328,14 @@ export default function ProjectsScreen() {
     setSavingProject(true);
 
     try {
-      const data = await projectsAPI.update(editingProject.id, {
+      const result = await updateProjectContext(editingProject.id, {
         ...projectForm,
         usuario_id: user.id,
       });
 
-      if (data.success) {
+      if (result.success) {
         Alert.alert('Éxito', 'Proyecto actualizado correctamente');
         closeModal();
-        loadProjects();
-      } else {
-        Alert.alert('Error', data.message || 'No se pudo actualizar el proyecto');
       }
     } catch (error: any) {
       console.error('Error updating project:', error);
@@ -376,14 +364,33 @@ export default function ProjectsScreen() {
 
   // Abrir proyecto
   const openProject = (project: Project) => {
-    //Alert.alert('Info', `Abrir proyecto: ${project.nombre}\n(Próximamente: Tablero Kanban)`);
     router.push(`/project/${project.id}` as any);
   };
 
-  // Eliminar proyecto
+  // ✅ ELIMINAR PROYECTO USANDO CONTEXTO
   const deleteProject = (project: Project) => {
-    if (!user?.id) return;
+  if (!user?.id) return;
+  console.log("Elimina");
 
+  // ✅ DETECTAR PLATAFORMA
+  if (Platform.OS === 'web') {
+    // 🌐 EN WEB: Usar window.confirm
+    const confirmed = window.confirm(
+      `¿Estás seguro de eliminar "${project.nombre}"?`
+    );
+
+    if (confirmed) {
+      deleteProjectContext(project.id, user.id)
+        .then(() => {
+          alert('Proyecto eliminado correctamente');
+        })
+        .catch((error: any) => {
+          console.error('Error deleting project:', error);
+          alert(error.response?.data?.message || 'Error de conexión');
+        });
+    }
+  } else {
+    // 📱 EN MÓVIL: Usar Alert.alert
     Alert.alert(
       'Confirmar',
       `¿Estás seguro de eliminar "${project.nombre}"?`,
@@ -394,14 +401,8 @@ export default function ProjectsScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              const data = await projectsAPI.delete(project.id, user.id);
-              
-              if (data.success) {
-                setProjects(projects.filter(p => p.id !== project.id));
-                Alert.alert('Éxito', 'Proyecto eliminado');
-              } else {
-                Alert.alert('Error', data.message || 'Error al eliminar');
-              }
+              await deleteProjectContext(project.id, user.id);
+              Alert.alert('Éxito', 'Proyecto eliminado');
             } catch (error: any) {
               console.error('Error deleting project:', error);
               Alert.alert('Error', error.response?.data?.message || 'Error de conexión');
@@ -410,7 +411,8 @@ export default function ProjectsScreen() {
         },
       ]
     );
-  };
+  }
+};
 
   // Renderizar tarjeta de proyecto
   const renderProject = ({ item }: { item: Project }) => (
@@ -443,11 +445,7 @@ export default function ProjectsScreen() {
         </View>
       </View>
 
-      {/* Estadísticas */}
-      <View style={styles.projectStats}>
-        <Text style={[styles.statsText, { color: colors.textTertiary }]}>5 tareas</Text>
-        <Text style={[styles.statsTextCompleted, { color: colors.success }]}>3 completadas</Text>
-      </View>
+
 
       {/* Miembros */}
       <View style={styles.membersContainer}>
@@ -472,7 +470,7 @@ export default function ProjectsScreen() {
     </TouchableOpacity>
   );
 
-  if (loading) {
+  if (loading && projects.length === 0) {
     return (
       <View style={[styles.centerContainer, { backgroundColor: colors.background }]}>
         <ActivityIndicator size="large" color={colors.accent} />
@@ -513,7 +511,7 @@ export default function ProjectsScreen() {
         <Ionicons name="add" size={28} color="#FFFFFF" />
       </TouchableOpacity>
 
-      {/* Modal para crear/editar - CONTENIDO SIMILAR AL ORIGINAL */}
+      {/* Modal para crear/editar */}
       <Modal
         visible={modalVisible}
         animationType="slide"
@@ -719,7 +717,7 @@ export default function ProjectsScreen() {
   );
 }
 
-// Styles (mantener los mismos que tienes actualmente)
+// ==================== ESTILOS ====================
 const styles = StyleSheet.create({
   container: { flex: 1 },
   centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
