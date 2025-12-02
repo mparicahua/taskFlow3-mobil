@@ -54,8 +54,11 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
   // ==================== SOCKET LISTENERS ====================
   const setupSocketListeners = () => {
     if (listenersSetup) {
+      console.log('Listeners ya configurados, saltando...');
       return;
     }
+
+    console.log(' Configurando listeners de Socket en ProjectContext');
 
     // ✨ AGREGAR ESTAS 7 LÍNEAS NUEVAS
     socketService.removeAllListeners('project:created');
@@ -68,12 +71,15 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
 
     // Proyecto creado
     socketService.on('project:created', (data: any) => {
+      console.log('[CONTEXT] Proyecto creado recibido:', data);
       
       setProjects((prev) => {
         const existe = prev.find((p) => p.id === data.project.id);
         if (!existe) {
+          console.log('[CONTEXT] Proyecto agregado a la lista');
           return [data.project, ...prev];
         } else {
+          console.log('[CONTEXT] Proyecto ya existe, ignorando');
           return prev;
         }
       });
@@ -81,19 +87,25 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
 
     // Proyecto actualizado
     socketService.on('project:updated', (data: any) => {
+      console.log('[CONTEXT] Proyecto actualizado recibido:', data);
+      
       setProjects((prev) =>
         prev.map((p) => (p.id === data.project.id ? { ...p, ...data.project } : p))
       );
+      console.log('[CONTEXT] Proyecto actualizado en la lista');
     });
 
     // Proyecto eliminado
     socketService.on('project:deleted', (data: any) => {
+      console.log('[CONTEXT] Proyecto eliminado recibido:', data);
       
       setProjects((prev) => prev.filter((p) => p.id !== data.projectId));
+      console.log('[CONTEXT] Proyecto eliminado de la lista');
     });
 
     // Miembro agregado
     socketService.on('project:member:added', (data: any) => {
+      console.log('[CONTEXT] Miembro agregado recibido:', data);
       
       setProjects((prev) =>
         prev.map((p) => {
@@ -111,10 +123,12 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
           return p;
         })
       );
+      console.log('[CONTEXT] Miembro agregado al proyecto');
     });
 
     // Miembro removido
     socketService.on('project:member:removed', (data: any) => {
+      console.log('[CONTEXT] Miembro removido recibido:', data);
       
       setProjects((prev) =>
         prev.map((p) => {
@@ -129,10 +143,12 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
           return p;
         })
       );
+      console.log('[CONTEXT] Miembro removido del proyecto');
     });
 
     // Te uniste a un proyecto
     socketService.on('project:joined', (data: any) => {
+      console.log('[CONTEXT] Te uniste a un proyecto:', data);
       
       // Recargar proyectos para obtener el nuevo
       const userStr = localStorage.getItem('user_data') || sessionStorage.getItem('user_data');
@@ -146,11 +162,12 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
 
     // Te removieron de un proyecto
     socketService.on('project:left', (data: any) => {
+      console.log('[CONTEXT] Te removieron de un proyecto:', data);
       setProjects((prev) => prev.filter((p) => p.id !== data.projectId));
     });
 
     setListenersSetup(true);
-
+    console.log('[CONTEXT] Listeners configurados correctamente');
   };
 
   // ==================== FETCH PROJECTS ====================
@@ -163,11 +180,12 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
 
       if (data.success) {
         setProjects(data.data);
+        console.log(`[CONTEXT] ${data.data.length} proyectos cargados`);
       } else {
         throw new Error(data.message || 'Error al cargar proyectos');
       }
     } catch (err: any) {
-      console.error('❌ [CONTEXT] Error al cargar proyectos:', err);
+      console.error('[CONTEXT] Error al cargar proyectos:', err);
       setError(err.response?.data?.message || err.message);
       throw err;
     } finally {
@@ -185,6 +203,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
         setProjects((prev) => {
           const existe = prev.find((p) => p.id === data.data.id);
           if (!existe) {
+            console.log('[CONTEXT] Proyecto creado localmente (optimistic)');
             return [data.data, ...prev];
           }
           return prev;
@@ -195,7 +214,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
         throw new Error(data.message || 'Error al crear proyecto');
       }
     } catch (err: any) {
-      console.error('❌ [CONTEXT] Error al crear proyecto:', err);
+      console.error('[CONTEXT] Error al crear proyecto:', err);
       throw err;
     }
   };
@@ -210,6 +229,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
         setProjects((prev) =>
           prev.map((p) => (p.id === projectId ? { ...p, ...data.data } : p))
         );
+        console.log('[CONTEXT] Proyecto actualizado localmente (optimistic)');
 
         return { success: true, data: data.data };
       } else {
@@ -229,19 +249,21 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       if (data.success) {
         // Optimistic update
         setProjects((prev) => prev.filter((p) => p.id !== projectId));
+        console.log('[CONTEXT] Proyecto eliminado localmente (optimistic)');
 
         return { success: true };
       } else {
         throw new Error(data.message || 'Error al eliminar proyecto');
       }
     } catch (err: any) {
-      console.error('❌ [CONTEXT] Error al eliminar proyecto:', err);
+      console.error('[CONTEXT] Error al eliminar proyecto:', err);
       throw err;
     }
   };
 
   // ==================== CLEAR PROJECTS ====================
   const clearProjects = () => {
+    console.log('Limpiando proyectos y listeners...');
     
     // ✨ AGREGAR ESTAS 7 LÍNEAS
     socketService.removeAllListeners('project:created');

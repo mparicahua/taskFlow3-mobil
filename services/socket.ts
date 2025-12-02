@@ -14,11 +14,14 @@ class SocketService {
    */
   connect(token: string) {
     if (this.socket?.connected) {
-      console.log('⚠️ Socket ya está conectado');
+      if (__DEV__) {
+        console.log('Socket ya está conectado');
+      }
       return;
     }
-
-    console.log('🔌 Conectando a Socket.IO...');
+    if (__DEV__) {
+      console.log('Conectando a Socket.IO...');
+    }
 
     this.socket = io(SOCKET_URL, {
       auth: { token },
@@ -31,33 +34,43 @@ class SocketService {
     // Eventos de conexión
     this.socket.on('connect', () => {
       this.isConnected = true;
-      console.log('✅ Socket conectado:', this.socket?.id);
+      if (__DEV__) {
+        console.log('Socket conectado:', this.socket?.id);
+      }
     });
 
     this.socket.on('disconnect', (reason) => {
       this.isConnected = false;
       this.isReady = false;
-      console.log('🔌 Socket desconectado:', reason);
+      if (__DEV__) {
+        console.log('Socket desconectado:', reason);
+      }
     });
 
     this.socket.on('connect_error', (error) => {
-      console.error('❌ Error de conexión Socket:', error.message);
+      console.error('Error de conexión Socket:', error.message);
     });
 
     this.socket.on('reconnect', (attemptNumber) => {
-      console.log(`🔄 Reconectado después de ${attemptNumber} intentos`);
+      if (__DEV__) {
+        console.log(`🔄 Reconectado después de ${attemptNumber} intentos`);
+      }
     });
 
     // Evento especial: connection:ready
     this.socket.on('connection:ready', (data) => {
       this.isReady = true;
-      console.log('🎉 Socket listo. Proyectos unidos:', data.projectsJoined);
+      if (__DEV__) {
+        console.log('Socket listo. Proyectos unidos:', data.projectsJoined);
+      }
     });
 
     // Debug: Ver todos los eventos (solo en desarrollo)
     if (__DEV__) {
       this.socket.onAny((eventName, ...args) => {
-        console.log(`📩 Evento recibido: ${eventName}`, args);
+        if (__DEV__) {
+          console.log(`Evento recibido: ${eventName}`, args);
+        }
       });
     }
   }
@@ -67,7 +80,9 @@ class SocketService {
    */
   disconnect() {
     if (this.socket) {
-      console.log('🔌 Desconectando socket...');
+      if (__DEV__) {
+        console.log('Desconectando socket...');
+      }
       this.socket.removeAllListeners();
       this.socket.disconnect();
       this.socket = null;
@@ -82,11 +97,13 @@ class SocketService {
    */
   emit(event: string, data?: any) {
     if (!this.socket) {
-      console.warn('⚠️ Socket no conectado, no se puede emitir:', event);
+      console.warn('Socket no conectado, no se puede emitir:', event);
       return;
     }
     this.socket.emit(event, data);
-    console.log(`📤 Evento emitido: ${event}`, data);
+    if (__DEV__) {
+      console.log(`Evento emitido: ${event}`, data);
+    }
   }
 
   /**
@@ -94,7 +111,7 @@ class SocketService {
    */
   on(event: string, callback: Function) {
     if (!this.socket) {
-      console.warn('⚠️ Socket no conectado, no se puede escuchar:', event);
+      console.warn('Socket no conectado, no se puede escuchar:', event);
       return;
     }
 
@@ -106,7 +123,9 @@ class SocketService {
 
     // Registrar listener en socket
     this.socket.on(event, callback as any);
-    console.log(`👂 Listener registrado: ${event}`);
+    if (__DEV__) {
+      console.log(`Listener registrado: ${event}`);
+    }
   }
 
   /**
