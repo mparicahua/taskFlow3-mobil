@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 
 import { projectsAPI } from '@/services/api';
-import { notificationService } from '@/services/notifications'; // ✨ NUEVO
 import { socketService } from '@/services/socket';
 
 // ==================== TIPOS ====================
@@ -58,7 +57,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    // Limpiar listeners previos
+    // ✨ AGREGAR ESTAS 7 LÍNEAS NUEVAS
     socketService.removeAllListeners('project:created');
     socketService.removeAllListeners('project:updated');
     socketService.removeAllListeners('project:deleted');
@@ -67,8 +66,9 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     socketService.removeAllListeners('project:joined');
     socketService.removeAllListeners('project:left');
 
-    // ==================== Proyecto creado ====================
-    socketService.on('project:created', async (data: any) => {
+    // Proyecto creado
+    socketService.on('project:created', (data: any) => {
+      
       setProjects((prev) => {
         const existe = prev.find((p) => p.id === data.project.id);
         if (!existe) {
@@ -77,41 +77,24 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
           return prev;
         }
       });
-
-      // ✨ NUEVO: Notificación
-      await notificationService.notifyProjectCreated(
-        data.project.nombre,
-        data.project.id,
-        data.creatorName || 'Alguien'
-      );
     });
 
-    // ==================== Proyecto actualizado ====================
-    socketService.on('project:updated', async (data: any) => {
+    // Proyecto actualizado
+    socketService.on('project:updated', (data: any) => {
       setProjects((prev) =>
         prev.map((p) => (p.id === data.project.id ? { ...p, ...data.project } : p))
       );
-
-      // ✨ NUEVO: Notificación
-      await notificationService.notifyProjectUpdated(
-        data.project.nombre,
-        data.project.id
-      );
     });
 
-    // ==================== Proyecto eliminado ====================
-    socketService.on('project:deleted', async (data: any) => {
+    // Proyecto eliminado
+    socketService.on('project:deleted', (data: any) => {
+      
       setProjects((prev) => prev.filter((p) => p.id !== data.projectId));
-
-      // ✨ NUEVO: Notificación
-      await notificationService.notifyProjectDeleted(
-        data.projectName || 'Un proyecto',
-        data.projectId
-      );
     });
 
-    // ==================== Miembro agregado ====================
-    socketService.on('project:member:added', async (data: any) => {
+    // Miembro agregado
+    socketService.on('project:member:added', (data: any) => {
+      
       setProjects((prev) =>
         prev.map((p) => {
           if (p.id === data.projectId) {
@@ -128,21 +111,11 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
           return p;
         })
       );
-
-      // ✨ NUEVO: Notificación
-      const project = projects.find((p) => p.id === data.projectId);
-      if (project) {
-        await notificationService.notifyMemberAdded(
-          project.nombre,
-          data.projectId,
-          data.member.usuario.nombre,
-          data.member.rol.nombre
-        );
-      }
     });
 
-    // ==================== Miembro removido ====================
-    socketService.on('project:member:removed', async (data: any) => {
+    // Miembro removido
+    socketService.on('project:member:removed', (data: any) => {
+      
       setProjects((prev) =>
         prev.map((p) => {
           if (p.id === data.projectId && p.proyecto_usuario_rol) {
@@ -156,20 +129,11 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
           return p;
         })
       );
-
-      // ✨ NUEVO: Notificación
-      const project = projects.find((p) => p.id === data.projectId);
-      if (project) {
-        await notificationService.notifyMemberRemoved(
-          project.nombre,
-          data.projectId,
-          data.userName || 'Un miembro'
-        );
-      }
     });
 
-    // ==================== Te uniste a un proyecto ====================
-    socketService.on('project:joined', async (data: any) => {
+    // Te uniste a un proyecto
+    socketService.on('project:joined', (data: any) => {
+      
       // Recargar proyectos para obtener el nuevo
       const userStr = localStorage.getItem('user_data') || sessionStorage.getItem('user_data');
       if (userStr) {
@@ -178,26 +142,15 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
           fetchProjects(user.id);
         }
       }
-
-      // ✨ NUEVO: Notificación
-      await notificationService.notifyJoinedProject(
-        data.projectName || 'Un nuevo proyecto',
-        data.projectId
-      );
     });
 
-    // ==================== Te removieron de un proyecto ====================
-    socketService.on('project:left', async (data: any) => {
+    // Te removieron de un proyecto
+    socketService.on('project:left', (data: any) => {
       setProjects((prev) => prev.filter((p) => p.id !== data.projectId));
-
-      // ✨ NUEVO: Notificación
-      await notificationService.notifyLeftProject(
-        data.projectName || 'Un proyecto',
-        data.projectId
-      );
     });
 
     setListenersSetup(true);
+
   };
 
   // ==================== FETCH PROJECTS ====================
@@ -214,7 +167,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
         throw new Error(data.message || 'Error al cargar proyectos');
       }
     } catch (err: any) {
-      console.error('[CONTEXT] Error al cargar proyectos:', err);
+      console.error('❌ [CONTEXT] Error al cargar proyectos:', err);
       setError(err.response?.data?.message || err.message);
       throw err;
     } finally {
@@ -242,7 +195,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
         throw new Error(data.message || 'Error al crear proyecto');
       }
     } catch (err: any) {
-      console.error(' [CONTEXT] Error al crear proyecto:', err);
+      console.error('❌ [CONTEXT] Error al crear proyecto:', err);
       throw err;
     }
   };
@@ -263,7 +216,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
         throw new Error(data.message || 'Error al actualizar proyecto');
       }
     } catch (err: any) {
-      console.error('[CONTEXT] Error al actualizar proyecto:', err);
+      console.error('❌ [CONTEXT] Error al actualizar proyecto:', err);
       throw err;
     }
   };
@@ -282,14 +235,15 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
         throw new Error(data.message || 'Error al eliminar proyecto');
       }
     } catch (err: any) {
-      console.error('[CONTEXT] Error al eliminar proyecto:', err);
+      console.error('❌ [CONTEXT] Error al eliminar proyecto:', err);
       throw err;
     }
   };
 
   // ==================== CLEAR PROJECTS ====================
   const clearProjects = () => {
-    // Limpiar listeners
+    
+    // ✨ AGREGAR ESTAS 7 LÍNEAS
     socketService.removeAllListeners('project:created');
     socketService.removeAllListeners('project:updated');
     socketService.removeAllListeners('project:deleted');
@@ -301,7 +255,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
     setProjects([]);
     setError(null);
     setListenersSetup(false);
-  };
+    };
 
   // ==================== CONTEXT VALUE ====================
   const value = {
@@ -316,6 +270,7 @@ export function ProjectProvider({ children }: { children: React.ReactNode }) {
   };
 
   // ==================== EXPONER setupSocketListeners ====================
+  // Para que AuthContext pueda llamarlo
   useEffect(() => {
     (ProjectProvider as any).setupListeners = setupSocketListeners;
   }, [listenersSetup]);

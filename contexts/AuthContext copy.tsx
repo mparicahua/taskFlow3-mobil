@@ -11,7 +11,6 @@ import {
   authEvents,
   storage,
 } from '@/services/api';
-import { notificationService } from '@/services/notifications'; // ✨ NUEVO
 import { socketService } from '@/services/socket';
 
 // Tipos basados en tu servidor TaskFlow3
@@ -113,9 +112,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setTimeout(() => {
             setupProjectListeners();
           }, 100);
-
-          // ✨ NUEVO: Inicializar notificaciones
-          await notificationService.initialize();
           
           router.replace('/(tabs)');
         } else {
@@ -165,7 +161,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(data.user);
 
       if (__DEV__) {
-        console.log('Login exitoso:', data.user.nombre);
+        console.log('✅ Login exitoso:', data.user.nombre);
       }
 
       // ✨ CONECTAR SOCKET Y CONFIGURAR LISTENERS
@@ -174,9 +170,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setTimeout(() => {
         setupProjectListeners();
       }, 100);
-
-      // ✨ NUEVO: Inicializar notificaciones
-      await notificationService.initialize();
 
       router.replace('/(tabs)');
     } catch (error: any) {
@@ -211,7 +204,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(data.user);
 
       if (__DEV__) {
-        console.log('Registro exitoso:', data.user.nombre);
+        console.log('✅ Registro exitoso:', data.user.nombre);
       }
 
       // ✨ CONECTAR SOCKET Y CONFIGURAR LISTENERS
@@ -220,9 +213,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setTimeout(() => {
         setupProjectListeners();
       }, 100);
-
-      // ✨ NUEVO: Inicializar notificaciones
-      await notificationService.initialize();
 
       router.replace('/(tabs)');
     } catch (error: any) {
@@ -251,7 +241,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           await authAPI.logout(refreshToken);
           
           if (__DEV__) {
-            console.log('Logout notificado al servidor');
+            console.log('✅ Logout notificado al servidor');
           }
         } catch (error) {
           console.error('Error notifying server about logout:', error);
@@ -260,10 +250,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       // ✨ DESCONECTAR SOCKET
       socketService.disconnect();
-
-      // ✨ NUEVO: Limpiar notificaciones
-      notificationService.cleanup();
-      await notificationService.cancelAllNotifications();
       
       await clearSession();
 
@@ -295,7 +281,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           await authAPI.logoutAll(refreshToken);
           
           if (__DEV__) {
-            console.log('Logout all notificado al servidor');
+            console.log('✅ Logout all notificado al servidor');
           }
         } catch (error) {
           console.error('Error notifying server about logout all:', error);
@@ -304,10 +290,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       // ✨ DESCONECTAR SOCKET
       socketService.disconnect();
-
-      // ✨ NUEVO: Limpiar notificaciones
-      notificationService.cleanup();
-      await notificationService.cancelAllNotifications();
       
       await clearSession();
 
@@ -338,7 +320,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     
     if (__DEV__) {
-      console.log('Sesión limpiada del storage');
+      console.log('🧹 Sesión limpiada del storage');
     }
   };
 

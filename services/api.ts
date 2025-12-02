@@ -17,8 +17,8 @@ const API_URL = 'https://taskflow3-server-production.up.railway.app';
 //const API_URL = 'http://localhost:3000';
 
 // Claves para almacenamiento
-const ACCESS_TOKEN_KEY = 'access_token';
-const REFRESH_TOKEN_KEY = 'refresh_token';
+const ACCESS_TOKEN_KEY = 'b8e38909bec1ac9199fb2d81ed7c6089c79100dc58868acaf1322077ceaa32faea0127ef93830fac88bad7fa548198dad4b0898ece73a1f91e23d712c7207657';
+const REFRESH_TOKEN_KEY = '89910a27b356e0f0932f20761b3a69097d3e5ea19b0ac3a3511cf1095da7f0902aa0565f669dd04de4b8dcd2bbc0b6796033684c2dd696bfaa8d1674e67d7630';
 const USER_KEY = 'user_data';
 
 // ==================== STORAGE HELPER ====================
